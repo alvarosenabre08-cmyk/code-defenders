@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Defenders: The Production Release</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ MENÚ ============ -->
+<section id="menu" class="screen">
+  <h1 class="logo">CODE<span>_</span>DEFENDERS</h1>
+  <p class="tag">// The Production Release — Tower Defense cooperativo para 4 devs</p>
+  <div class="card">
+    <label>Tu nombre
+      <input id="inName" maxlength="12" placeholder="dev_1" autocomplete="off">
+    </label>
+    <button id="btnCreate" class="btn primary">Crear sala</button>
+    <div class="row">
+      <input id="inCode" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
+      <button id="btnJoin" class="btn">Unirse</button>
+    </div>
+    <button id="btnSolo" class="btn ghost">Práctica en solitario</button>
+    <p id="menuMsg" class="msg"></p>
+  </div>
+  <p class="hint">Defended el servidor de producción de Bugs, Memory Leaks, NullPointerExceptions, ataques DDoS y Merge Conflicts durante 20 oleadas.</p>
+</section>
+
+<!-- ============ SALA ============ -->
+<section id="lobby" class="screen hidden">
+  <p class="tag">// Código de la sala — pásaselo a tus compañeros</p>
+  <h1 id="lobbyCode" class="code">----</h1>
+  <ul id="lobbyPlayers" class="players"></ul>
+  <button id="btnStart" class="btn primary">Desplegar a producción (empezar)</button>
+  <p id="lobbyMsg" class="msg"></p>
+  <button id="btnLeave" class="btn ghost">Salir</button>
+</section>
+
+<!-- ============ JUEGO ============ -->
+<section id="game" class="hidden">
+  <header class="hud">
+    <div class="hud-title">CODE<span>_</span>DEFENDERS</div>
+    <div class="stat">SALA <b id="hudCode">----</b></div>
+    <div class="stat">OLEADA <b id="hudWave">0/20</b></div>
+    <div class="stat cpu">CPU <b id="hudCpu">0</b></div>
+    <div class="stat life">SERVIDOR
+      <div class="bar"><div id="hudLifeBar"></div></div><b id="hudLife">100</b>
+    </div>
+    <div id="hudPlayers" class="chips"></div>
+    <div class="spacer"></div>
+    <button id="btnNext" class="btn small">Siguiente oleada <span id="hudNext"></span></button>
+    <button id="btnPause" class="btn small">Pausa (P)</button>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="cv" width="1280" height="640"></canvas>
+    <div id="panel" class="panel hidden"></div>
+    <div id="overlay" class="overlay hidden">
+      <h2 id="ovTitle"></h2>
+      <p id="ovSub"></p>
+      <button id="ovBtn" class="btn primary"></button>
+    </div>
+  </div>
+
+  <footer class="shop">
+    <div id="shop" class="shop-items"></div>
+    <div id="info" class="info">Elige una torre (teclas 1-8) y haz clic en el mapa. Clic en una torre para mejorarla, venderla o moverla. Esc cancela.</div>
+  </footer>
+</section>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
