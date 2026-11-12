@@ -1,8 +1,8 @@
 // ============================================================
 //  Code Defenders — dibujo en Canvas 2D (todo vectorial, sin imágenes)
 // ============================================================
-import { W, H, CELL, COLS, ROWS, PTS, BASE, TOWERS, ENEMIES, ENEMY_KEYS, pathPos, START_LIFE } from './data.js';
-import { towerRange, soldierD } from './sim.js';
+import { W, H, CELL, COLS, ROWS, PTS, BASE, TOWERS, ENEMIES, ENEMY_KEYS, pathPos, START_LIFE, stats, skin } from './data.js';
+import { tStats, tRange, soldierD } from './sim.js';
 
 const TAU = Math.PI * 2;
 let bg = null;
@@ -56,17 +56,26 @@ function buildBg() {
 }
 
 // ---------- torres ----------
-export function drawTower(ctx, k, x, y, l, ang, time, off) {
-  const col = off ? '#566' : TOWERS[k].color;
+export function drawTower(ctx, k, x, y, p, ang, time, off) {
+  p = p || [0, 0, 0];
+  const sk = skin(k, p), total = p[0] + p[1] + p[2];
+  const col = off ? '#566' : sk.main, acc = off ? '#566' : sk.accent;
+  // decoraciones de nivel alto (debajo del cuerpo)
+  if (sk.tier >= 3 && !off) drawUltimate(ctx, x, y, sk.dom, acc, time);
   ctx.save();
   ctx.translate(x, y);
+  const sc = 1 + total * 0.035;
+  ctx.scale(sc, sc);
   ctx.lineJoin = 'round';
   ctx.fillStyle = '#0b1020';
   switch (k) {
     case 'firewall':
       poly(ctx, 0, 0, 15, 6, TAU / 12); ctx.fill(); neon(ctx, col);
       ctx.rotate(ang);
-      ctx.beginPath(); ctx.moveTo(2, -4); ctx.lineTo(19, -4); ctx.moveTo(2, 4); ctx.lineTo(19, 4); neon(ctx, col, 2.5);
+      ctx.beginPath(); ctx.moveTo(2, -4); ctx.lineTo(19, -4); ctx.moveTo(2, 4); ctx.lineTo(19, 4);
+      if (p[0] >= 2) { ctx.moveTo(2, 0); ctx.lineTo(22, 0); }
+      neon(ctx, col, 2.5);
+      if (p[1] >= 3) { ctx.beginPath(); ctx.arc(22, 0, 4 + Math.sin(time * 20) * 1.5, 0, TAU); ctx.fillStyle = '#ff9d00'; ctx.fill(); }
       ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fillStyle = col; ctx.fill();
       break;
     case 'gc': {
@@ -91,7 +100,9 @@ export function drawTower(ctx, k, x, y, l, ang, time, off) {
     case 'debugger':
       poly(ctx, 0, 0, 14, 3, ang); ctx.fill(); neon(ctx, col);
       ctx.rotate(ang);
-      ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(26, 0); neon(ctx, col, 3);
+      ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(26 + p[0] * 3, 0);
+      if (p[1] >= 3) { ctx.moveTo(4, -5); ctx.lineTo(24, -5); }
+      neon(ctx, col, 3);
       ctx.beginPath(); ctx.arc(0, 0, 4, 0, TAU); ctx.fillStyle = col; ctx.fill();
       break;
     case 'docker':
@@ -114,11 +125,59 @@ export function drawTower(ctx, k, x, y, l, ang, time, off) {
       }
       break;
   }
+  // detalle de rama a partir de nivel 1 y 2
+  if (sk.tier >= 1) {
+    ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, TAU); ctx.fillStyle = acc; ctx.fill();
+  }
+  if (sk.tier >= 2) {
+    ctx.strokeStyle = acc; ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      ctx.save(); ctx.rotate(i * TAU / 4 + Math.PI / 4);
+      ctx.beginPath(); ctx.moveTo(15, -4); ctx.lineTo(19, 0); ctx.lineTo(15, 4); ctx.stroke();
+      ctx.restore();
+    }
+  }
   ctx.restore();
-  // nivel
-  ctx.fillStyle = off ? '#566' : '#fff';
-  for (let i = 0; i < l; i++) ctx.fillRect(x - l * 3 + i * 6 + 1, y + 16, 4, 3);
+  // marcas de nivel por rama (3 columnas)
+  if (total && !off) {
+    TOWERS[k].paths.forEach((P, i) => {
+      for (let j = 0; j < p[i]; j++) { ctx.fillStyle = P.color; ctx.fillRect(x - 10 + i * 7, y + 22 - j * 4, 5, 3); }
+    });
+  }
 }
+
+/** Aspecto especial de nivel 3: una forma distinta por rama. */
+function drawUltimate(ctx, x, y, dom, c, time) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dom === 0) {
+    // engranaje giratorio con pinchos
+    ctx.rotate(time * 1.2);
+    ctx.beginPath();
+    for (let i = 0; i < 16; i++) {
+      const r = i % 2 ? 19 : 25, a = (i / 16) * TAU;
+      ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath(); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fill(); neon(ctx, c, 1.5);
+  } else if (dom === 1) {
+    // halo pulsante
+    const g = ctx.createRadialGradient(0, 0, 6, 0, 0, 30);
+    g.addColorStop(0, c); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.35 + 0.2 * Math.sin(time * 4);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 30, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    poly(ctx, 0, 0, 23, 6, time * 0.4); neon(ctx, c, 1.5);
+  } else {
+    // satélites en órbita
+    ctx.beginPath(); ctx.arc(0, 0, 22, 0, TAU); ctx.strokeStyle = c; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
+    for (let i = 0; i < 3; i++) {
+      const a = time * 2 + i * TAU / 3;
+      poly(ctx, Math.cos(a) * 22, Math.sin(a) * 22, 4, 4, a); ctx.fillStyle = c; ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 
 // ---------- enemigos ----------
 function drawEnemy(ctx, e, x, y, time) {
@@ -165,6 +224,8 @@ function drawEnemy(ctx, e, x, y, time) {
     }
   }
   ctx.restore();
+  if (e.bt > 0) { ctx.fillStyle = `rgba(255,${120 + Math.floor(Math.sin(time * 30 + e.i) * 60)},40,0.8)`; ctx.beginPath(); ctx.arc(x + Math.sin(time * 9 + e.i) * r * 0.6, y - r * 0.6, 3, 0, TAU); ctx.fill(); }
+  if (e.vt > 0) { ctx.strokeStyle = e.vu >= 1 ? '#7dff5a' : '#c77dff'; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(x, y, r + 7, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
   if (e.st > 0) { ctx.strokeStyle = '#3fb8ff'; ctx.lineWidth = 2; ctx.strokeRect(x - r - 4, y - r - 4, r * 2 + 8, r * 2 + 8); }
   else if (e.sl > 0) { ctx.strokeStyle = 'rgba(125,255,90,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, r + 4, 0, TAU); ctx.stroke(); }
   if (e.h < e.m) {
@@ -175,7 +236,7 @@ function drawEnemy(ctx, e, x, y, time) {
 }
 
 // ---------- efectos ----------
-const DUR = { b: 0.09, s: 0.35, a: 0.4, c: 0.25, d: 0.6, p: 0.4, m: 1.1, h: 0.5, w: 2.2 };
+const DUR = { b: 0.09, s: 0.35, a: 0.4, c: 0.25, d: 0.6, p: 0.4, m: 1.1, h: 0.5, w: 2.2, f: 0.35, x: 0.5, k: 1.2, l: 1.5 };
 export function addFx(list, now) {
   for (const f of list) fxs.push({ f, t0: now, dur: DUR[f[0]] || 0.3 });
   if (fxs.length > 400) fxs.splice(0, fxs.length - 400);
@@ -188,16 +249,16 @@ function drawFx(ctx, now) {
     ctx.globalAlpha = 1 - p;
     switch (f[0]) {
       case 'b':
-        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, TOWERS.firewall.color, 1.5);
+        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, f[5] || TOWERS.firewall.color, 1.5);
         break;
       case 's':
-        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, TOWERS.debugger.color, 4 * (1 - p) + 1);
+        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, f[5] || TOWERS.debugger.color, 4 * (1 - p) + 1);
         ctx.beginPath(); ctx.arc(f[3], f[4], 6 + p * 18, 0, TAU); neon(ctx, '#fff', 1.5);
         break;
       case 'a':
-        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, TOWERS.gc.color, 1.5);
+        ctx.beginPath(); ctx.moveTo(f[1], f[2]); ctx.lineTo(f[3], f[4]); neon(ctx, f[6] || TOWERS.gc.color, 1.5);
         ctx.beginPath(); ctx.arc(f[3], f[4], f[5] * (0.3 + 0.7 * p), 0, TAU);
-        ctx.fillStyle = 'rgba(125,255,90,0.15)'; ctx.fill(); neon(ctx, TOWERS.gc.color, 2);
+        ctx.globalAlpha *= 0.3; ctx.fillStyle = f[6] || TOWERS.gc.color; ctx.fill(); ctx.globalAlpha = 1 - p; neon(ctx, f[6] || TOWERS.gc.color, 2);
         break;
       case 'c': {
         const q = f[1];
@@ -207,12 +268,12 @@ function drawFx(ctx, now) {
           const mx = (q[j - 2] + q[j]) / 2 + Math.sin(j * 9.1 + t0 * 50) * 8, my = (q[j - 1] + q[j + 1]) / 2 + Math.cos(j * 7.3 + t0 * 50) * 8;
           ctx.lineTo(mx, my); ctx.lineTo(q[j], q[j + 1]);
         }
-        neon(ctx, TOWERS.balancer.color, 2);
+        neon(ctx, f[2] || TOWERS.balancer.color, 2);
         break;
       }
       case 'd':
         ctx.beginPath(); ctx.rect(f[1] - f[3] * (1 - p * 0.3), f[2] - f[3] * (1 - p * 0.3), f[3] * 2 * (1 - p * 0.3), f[3] * 2 * (1 - p * 0.3));
-        neon(ctx, TOWERS.docker.color, 3);
+        neon(ctx, f[4] || TOWERS.docker.color, 3);
         break;
       case 'p': {
         const col = ENEMIES[ENEMY_KEYS[f[3]]].color;
@@ -228,6 +289,25 @@ function drawFx(ctx, now) {
       case 'm':
         ctx.fillStyle = '#ffe66b'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
         ctx.fillText('+' + f[3] + ' CPU', f[1], f[2] - p * 26);
+        break;
+      case 'f': {
+        const g = ctx.createRadialGradient(f[1], f[2], 2, f[1], f[2], f[3]);
+        g.addColorStop(0, '#ffffff'); g.addColorStop(0.3, f[4]); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = (1 - p) * 0.7; ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(f[1], f[2], f[3] * (0.5 + 0.5 * p), 0, TAU); ctx.fill();
+        break;
+      }
+      case 'x':
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('CRIT!', f[1], f[2] - 16 - p * 14);
+        break;
+      case 'k':
+        ctx.strokeStyle = '#7dff5a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(f[1], f[2], 26 - p * 12, 0, TAU); ctx.moveTo(f[1] - 30, f[2]); ctx.lineTo(f[1] + 30, f[2]); ctx.moveTo(f[1], f[2] - 30); ctx.lineTo(f[1], f[2] + 30); ctx.stroke();
+        break;
+      case 'l':
+        ctx.fillStyle = '#5aff7d'; ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('+' + f[1] + ' VIDA', BASE.x + BASE.w / 2 - 20, BASE.y - 10 - p * 20);
         break;
       case 'h':
         ctx.globalAlpha = (1 - p) * 0.35; ctx.fillStyle = '#ff2040'; ctx.fillRect(0, 0, W, H);
@@ -274,13 +354,13 @@ export function render(ctx, G, o) {
   for (const t of G.T) {
     const x = t.x * CELL + 20, y = t.y * CELL + 20;
     if (t.k === 'docker') {
-      const r = towerRange('docker', t.l);
+      const r = tRange(t);
       ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
       ctx.fillStyle = 'rgba(63,184,255,0.07)'; ctx.fill();
       ctx.setLineDash([8, 8]); ctx.lineDashOffset = time * 20; ctx.strokeStyle = 'rgba(63,184,255,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.restore();
     } else if (t.k === 'linter') {
-      ctx.beginPath(); ctx.arc(x, y, towerRange('linter', t.l) * (0.92 + 0.08 * Math.sin(time * 2)), 0, TAU);
+      ctx.beginPath(); ctx.arc(x, y, tRange(t) * (0.92 + 0.08 * Math.sin(time * 2)), 0, TAU);
       ctx.strokeStyle = 'rgba(199,125,255,0.25)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
   }
@@ -288,12 +368,12 @@ export function render(ctx, G, o) {
   // Threads (soldados)
   for (const t of G.T) {
     if (t.k !== 'thread' || t._rd < 0) continue;
-    const uhp = TOWERS.thread.uhp * (1 + 0.6 * (t.l - 1));
+    const st = tStats(t), uhp = st.uhp, ucol = skin(t.k, t.p).main, ur = st.big ? 11 : 6;
     t.s.forEach((s, j) => {
       if (s.h <= 0) return;
       const p = pathPos(soldierD(t, j)), y = p.y + (j % 2 ? 7 : -7);
-      poly(ctx, p.x, y, 6, 3, time * (s.e ? 10 : 1) + j); ctx.fillStyle = '#0b1020'; ctx.fill(); neon(ctx, TOWERS.thread.color, 2);
-      if (s.h < uhp) { ctx.fillStyle = '#ffd23f'; ctx.fillRect(p.x - 6, y - 11, 12 * (s.h / uhp), 2); }
+      poly(ctx, p.x, y, ur, st.big ? 5 : 3, time * (s.e ? 10 : 1) + j); ctx.fillStyle = '#0b1020'; ctx.fill(); neon(ctx, ucol, 2);
+      if (s.h < uhp) { ctx.fillStyle = ucol; ctx.fillRect(p.x - ur, y - ur - 5, ur * 2 * (s.h / uhp), 2); }
     });
   }
 
@@ -310,11 +390,11 @@ export function render(ctx, G, o) {
     const x = t.x * CELL + 20, y = t.y * CELL + 20, off = t.dz > 0 || o.movingId === t.i;
     if (o.selId === t.i) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(t.x * CELL + 1.5, t.y * CELL + 1.5, CELL - 3, CELL - 3);
-      const r = towerRange(t.k, t.l);
+      const r = t.k === 'backup' ? 0 : tRange(t);
       if (r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.stroke(); }
     }
     if (t._b > 0) { ctx.beginPath(); ctx.arc(x, y, 19, 0, TAU); ctx.strokeStyle = 'rgba(199,125,255,0.6)'; ctx.lineWidth = 1; ctx.stroke(); }
-    drawTower(ctx, t.k, x, y, t.l, t.a, time, off);
+    drawTower(ctx, t.k, x, y, t.p, t.a, time, off);
     if (t.dz > 0) { ctx.fillStyle = '#fff'; ctx.font = '9px monospace'; ctx.textAlign = 'center'; ctx.fillText('REBOOT', x, y - 20); }
     if (t.k === 'thread' && t._rd < 0) { ctx.fillStyle = '#ff3f5a'; ctx.font = '9px monospace'; ctx.textAlign = 'center'; ctx.fillText('SIN RUTA', x, y - 20); }
   }
@@ -323,19 +403,19 @@ export function render(ctx, G, o) {
 
   // fantasma de construcción
   if (o.placing && o.hover) {
-    const x = o.hover.cx * CELL + 20, y = o.hover.cy * CELL + 20, lvl = o.placingLvl || 1;
+    const x = o.hover.cx * CELL + 20, y = o.hover.cy * CELL + 20, pp = o.placingP || [0, 0, 0];
     ctx.fillStyle = o.valid ? 'rgba(90,255,125,0.18)' : 'rgba(255,63,90,0.25)';
     ctx.fillRect(o.hover.cx * CELL, o.hover.cy * CELL, CELL, CELL);
-    const r = towerRange(o.placing, lvl);
+    const r = o.placing === 'backup' ? 0 : stats(o.placing, pp).range;
     if (r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.strokeStyle = o.valid ? 'rgba(255,255,255,0.5)' : 'rgba(255,63,90,0.6)'; ctx.lineWidth = 1.5; ctx.stroke(); }
-    ctx.save(); ctx.globalAlpha = 0.7; drawTower(ctx, o.placing, x, y, lvl, 0, time, !o.valid); ctx.restore();
+    ctx.save(); ctx.globalAlpha = 0.7; drawTower(ctx, o.placing, x, y, pp, 0, time, !o.valid); ctx.restore();
   }
 
   // cursores de los compañeros
   for (const c of o.cursors || []) {
     ctx.save();
     ctx.translate(c.x, c.y);
-    if (c.b && TOWERS[c.b]) { ctx.globalAlpha = 0.5; drawTower(ctx, c.b, 26, 26, 0, 0, time, false); ctx.globalAlpha = 1; }
+    if (c.b && TOWERS[c.b]) { ctx.globalAlpha = 0.5; drawTower(ctx, c.b, 26, 26, null, 0, time, false); ctx.globalAlpha = 1; }
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 17); ctx.lineTo(5, 13); ctx.lineTo(12, 12); ctx.closePath();
     ctx.fillStyle = c.color; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
     ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';

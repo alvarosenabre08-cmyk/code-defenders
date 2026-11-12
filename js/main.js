@@ -5,8 +5,8 @@
 //  instantáneas; los demás envían acciones y dibujan lo que reciben.
 //  Si el anfitrión se va, el jugador más antiguo de la sala hereda el puesto.
 // ============================================================
-import { W, H, CELL, MAX_WAVE, START_LIFE, PLAYER_COLORS, TOWERS, TOWER_KEYS } from './data.js';
-import { newGame, step, applyAction, pack, unpack, STEP, MAX_LEVEL, cellFree, towerAt, buildCost, upgradeCost, sellValue, towerRange } from './sim.js';
+import { W, H, CELL, MAX_WAVE, START_LIFE, PLAYER_COLORS, TOWERS, TOWER_KEYS, MAX_TIER, pathLock, skin } from './data.js';
+import { newGame, step, applyAction, pack, unpack, STEP, cellFree, towerAt, buildCost, upgradeCost, sellValue, tStats, tRange } from './sim.js';
 import { render, addFx, drawTower } from './render.js';
 import { isConfigured } from './net.js';
 
@@ -32,6 +32,9 @@ const cv = $('cv'), ctx = cv.getContext('2d');
 // ---------- pantallas ----------
 function show(name) {
   for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== name);
+  $('chat').classList.toggle('hidden', solo || !net || name === 'menu');
+  $('chat').classList.toggle('lobby', name === 'lobby');
+  $('btnChat').classList.toggle('hidden', solo || !net);
 }
 const current = () => ['menu', 'lobby', 'game'].find((s) => !$(s).classList.contains('hidden'));
 
@@ -87,7 +90,7 @@ addEventListener('pagehide', () => net?.leave());
 // ---------- sala ----------
 function subscribe() {
   net.on('meta', (m) => { meta = m; evalHost(); updateLobby(); if (m?.started && current() !== 'game') show('game'); });
-  net.on('players', (p) => { players = p || {}; evalHost(); updateLobby(); updateChips(); });
+  net.on('players', (p) => { players = p || {}; playersChanged(); evalHost(); updateLobby(); updateChips(); });
   net.on('s', (str) => {
     if (!str) return;
     lastSnapStr = str;
@@ -98,7 +101,55 @@ function subscribe() {
     addFx(u.fx, now());
   });
   net.on('c', (c) => { cursors = c || {}; });
+  net.onChat(addChat);
 }
+
+// ---------- chat ----------
+const chatLog = $('chatLog'), chatIn = $('chatIn');
+let lastChat = -1e9, knownPlayers = null;
+function addChat(msg) {
+  if (!msg || !msg.m) return;
+  const div = document.createElement('div');
+  if (msg.sys) { div.className = 'sys'; div.textContent = msg.m; }
+  else {
+    const b = document.createElement('b');
+    b.style.color = PLAYER_COLORS[(msg.s | 0) % 4];
+    b.textContent = String(msg.n || '?').slice(0, 12) + ':';
+    div.append(b, document.createTextNode(String(msg.m).slice(0, 120)));
+  }
+  chatLog.append(div);
+  while (chatLog.children.length > 40) chatLog.firstChild.remove();
+  chatLog.scrollTop = chatLog.scrollHeight;
+  setTimeout(() => div.classList.add('old'), 12000);
+}
+function openChat() { $('chat').classList.add('open'); chatIn.focus(); chatLog.scrollTop = chatLog.scrollHeight; }
+function closeChat() { $('chat').classList.remove('open'); chatIn.blur(); }
+chatIn.addEventListener('focus', () => $('chat').classList.add('open'));
+chatIn.addEventListener('blur', () => $('chat').classList.remove('open'));
+chatIn.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Escape') { chatIn.value = ''; closeChat(); return; }
+  if (e.key !== 'Enter') return;
+  const m = chatIn.value.trim();
+  if (!m) { chatIn.value = ''; closeChat(); return; }
+  if (performance.now() - lastChat < 600) return; // anti-spam: conserva el texto
+  chatIn.value = '';
+  lastChat = performance.now();
+  const me = players[net.pid];
+  net.chat(myName, me ? me.slot : 0, m.slice(0, 120));
+  closeChat();
+});
+/** Avisos de "X se ha unido / ha salido" en el chat. */
+function playersChanged() {
+  const now = new Set(Object.keys(players));
+  if (knownPlayers) {
+    for (const id of now) if (!knownPlayers.has(id) && id !== net.pid) addChat({ sys: 1, m: `${players[id].name} se ha unido.` });
+    for (const id of knownPlayers) if (!now.has(id) && knownNames[id]) addChat({ sys: 1, m: `${knownNames[id]} ha salido.` });
+  }
+  knownPlayers = now;
+  for (const id of now) knownNames[id] = players[id].name;
+}
+const knownNames = {};
 function sortedPlayers() {
   return Object.entries(players).sort((a, b) => (a[1].slot ?? 9) - (b[1].slot ?? 9));
 }
@@ -192,7 +243,7 @@ for (const [i, k] of TOWER_KEYS.entries()) {
   const d = TOWERS[k], b = document.createElement('button');
   b.className = 'item';
   const ic = document.createElement('canvas'); ic.width = ic.height = 44;
-  drawTower(ic.getContext('2d'), k, 22, 20, 1, -0.6, 0.4, false);
+  drawTower(ic.getContext('2d'), k, 22, 20, null, -0.6, 0.4, false);
   const txt = document.createElement('div');
   txt.innerHTML = `<b style="color:${d.color}">${d.name}</b><span class="cost"></span> <span class="key">[${i + 1}]</span>`;
   b.append(ic, txt);
@@ -246,15 +297,66 @@ cv.addEventListener('pointerdown', (e) => {
   const t = towerAt(G, cx, cy);
   selId = t ? t.i : null;
 });
+/** Torre sobre la que actúan U/X/M: la seleccionada o, si no hay, la que está bajo el ratón. */
+function targetTower() {
+  if (!G) return null;
+  if (selId) { const t = G.T.find((q) => q.i === selId); if (t) return t; }
+  return hover ? towerAt(G, hover.cx, hover.cy) : null;
+}
+const PATH_KEYS = ['U', 'I', 'O'];
+function upgrade(t, i) {
+  if (!t) return info('Selecciona una torre o pon el ratón encima.', true);
+  const P = TOWERS[t.k].paths[i], lock = pathLock(t.p, i);
+  if (lock) return info(`${P.name}: ${lock}.`, true);
+  const cost = upgradeCost(t, i), u = P.ups[t.p[i]];
+  if (G.money < cost) return info(`CPU insuficiente: "${u.n}" cuesta ${cost}.`, true);
+  act({ t: 'up', id: t.i, p: i });
+  info(`${TOWERS[t.k].name} → ${u.n}: ${u.d}`);
+}
+function sell(t) {
+  if (!t) return info('Selecciona una torre o pon el ratón encima.', true);
+  act({ t: 'sell', id: t.i });
+  info(`${TOWERS[t.k].name} vendida (+${sellValue(t)} CPU).`);
+  if (selId === t.i) selId = null;
+}
+function startMove(t) {
+  if (!t) return info('Selecciona una torre o pon el ratón encima.', true);
+  selId = t.i; placing = t.k; movingId = t.i;
+  info('Haz clic en la nueva posición (la torre tarda 3 s en reiniciarse). Esc cancela.');
+}
+function cycleTower() {
+  if (!G || !G.T.length) return;
+  const list = [...G.T].sort((a, b) => a.x - b.x || a.y - b.y);
+  const i = list.findIndex((t) => t.i === selId);
+  selId = list[(i + 1) % list.length].i;
+  placing = null; movingId = null;
+}
+const toggleKeys = () => $('keys').classList.toggle('hidden');
+
 addEventListener('keydown', (e) => {
-  if (current() !== 'game' || e.target.tagName === 'INPUT') return;
-  if (e.key === 'Escape') cancel();
-  else if (e.key >= '1' && e.key <= '8') choose(TOWER_KEYS[+e.key - 1]);
-  else if (e.key === 'p' || e.key === 'P') act({ t: 'pause' });
-  else if (e.key === ' ') { e.preventDefault(); act({ t: 'next' }); }
+  if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && net && !solo && current() !== 'menu') { e.preventDefault(); openChat(); return; }
+  if (current() !== 'game' || e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const playing = G && G.ph === 'play';
+  if (k === 'Escape') { cancel(); $('keys').classList.add('hidden'); }
+  else if (k >= '1' && k <= '8') choose(TOWER_KEYS[+k - 1]);
+  else if (k === 'p') act({ t: 'pause' });
+  else if (k === 'h') toggleKeys();
+  else if (!playing) return;
+  else if (k === ' ') { e.preventDefault(); act({ t: 'next' }); }
+  else if (k === 'a') act({ t: 'auto' });
+  else if (k === 'u') upgrade(targetTower(), 0);
+  else if (k === 'i') upgrade(targetTower(), 1);
+  else if (k === 'o') upgrade(targetTower(), 2);
+  else if (k === 'x' || k === 'Delete' || k === 'Backspace') { e.preventDefault(); sell(targetTower()); }
+  else if (k === 'm') startMove(targetTower());
+  else if (k === 'Tab') { e.preventDefault(); cycleTower(); }
 });
 $('btnPause').onclick = () => act({ t: 'pause' });
 $('btnNext').onclick = () => act({ t: 'next' });
+$('btnAuto').onclick = () => act({ t: 'auto' });
+$('btnKeys').onclick = toggleKeys;
+$('btnChat').onclick = (e) => { e.currentTarget.blur(); openChat(); };
 $('ovBtn').onclick = () => { if (G?.ph === 'play') act({ t: 'pause' }); else act({ t: 'restart' }); };
 
 // cursor propio -> red (máx. 10 veces/s)
@@ -272,37 +374,50 @@ function updatePanel() {
     if (panelSig) { $('panel').classList.add('hidden'); panelSig = ''; }
     return;
   }
-  const d = TOWERS[t.k], maxed = t.l >= MAX_LEVEL, uc = maxed ? 0 : upgradeCost(t), can = !maxed && G.money >= uc;
-  const sig = [t.i, t.l, can, t.x > 16, t._rd < 0].join();
+  const d = TOWERS[t.k], st = tStats(t);
+  const rows = d.paths.map((P, i) => {
+    const lock = pathLock(t.p, i), u = P.ups[t.p[i]], cost = u ? upgradeCost(t, i) : 0;
+    return { P, i, lock, u, cost, can: !lock && G.money >= cost };
+  });
+  const sig = [t.i, t.p.join(''), t._disc, rows.map((r) => r.can).join(''), t.x > 16, t._rd < 0].join();
   if (sig === panelSig) return;
   panelSig = sig;
   const p = $('panel');
   p.classList.remove('hidden');
   p.classList.toggle('left', t.x > 16);
-  const stats = [];
-  const lm = 1 + 0.6 * (t.l - 1), i = t.l - 1;
-  if (d.dmg) stats.push(`Daño ${Math.round(d.dmg * lm)} cada ${d.rate}s`);
-  if (d.dps) stats.push(`Daño ${Math.round(d.dps * lm)}/s · congela ${d.stun[i]}s`);
-  if (d.units) stats.push(`${d.units[i]} threads · ${Math.round(d.uhp * lm)} vida`);
-  if (d.buff) stats.push(`+${Math.round(d.buff[i] * 100)}% daño a torres adyacentes`);
-  if (d.hops) stats.push(`${d.hops[i]} rebotes`);
-  if (d.income) stats.push(`+${d.income[i]} CPU cada ${d.period}s`);
-  if (d.range) stats.push(`Alcance ${Math.round(towerRange(t.k, t.l))}`);
-  p.innerHTML = `<h3 style="color:${d.color}">${d.name} <small>nv.${t.l}</small></h3>
-    <p>${d.desc}</p><p style="color:var(--text)">${stats.join(' · ')}</p>
+  const r0 = (n) => Math.round(n * 10) / 10;
+  const lines = [];
+  if (st.dmg) lines.push(`Daño ${Math.round(st.dmg)} cada ${r0(st.rate)}s${st.targets > 1 ? ` ×${st.targets}` : ''}`);
+  if (st.dps) lines.push(`${Math.round(st.dps)} daño/s · congela ${r0(st.stun)}s cada ${st.cycle}s`);
+  if (st.units) lines.push(`${st.units} threads · ${Math.round(st.uhp)} vida · ${r0(st.udmg)} daño`);
+  if (st.buff) lines.push(`+${Math.round(st.buff * 100)}% daño a torres cercanas`);
+  if (st.hops) lines.push(`${st.hops} rebotes${st.chains > 1 ? ` ×${st.chains} cadenas` : ''}`);
+  if (st.income) lines.push(`+${Math.round(st.income)} CPU cada ${st.period}s`);
+  if (t.k !== 'backup') lines.push(`Alcance ${Math.round(tRange(t))}`);
+  const sk = skin(t.k, t.p);
+  const title = sk.tier ? d.paths[sk.dom].ups[sk.tier - 1].n : d.name;
+  p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
+    <p class="sub">${d.name}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
+    <p style="color:var(--text)">${lines.join(' · ')}</p>
     ${t.k === 'thread' && t._rd < 0 ? '<p style="color:var(--pink)">¡Demasiado lejos de la ruta! Muévela.</p>' : ''}
+    ${rows.map((r) => `
+      <div class="path" style="--pc:${r.P.color}">
+        <div class="ptop"><b>${r.P.name}</b><span class="pips">${[0, 1, 2].map((j) => `<i class="${j < t.p[r.i] ? 'on' : ''}"></i>`).join('')}</span></div>
+        ${r.u && !r.lock
+          ? `<button class="btn small up" data-a="up" data-p="${r.i}" ${r.can ? '' : 'disabled'}>[${PATH_KEYS[r.i]}] ${esc(r.u.n)} · ${r.cost} CPU</button><small>${esc(r.u.d)}</small>`
+          : `<small class="lock">${r.lock}</small>`}
+      </div>`).join('')}
     <div class="btns">
-      <button class="btn small" data-a="up" ${can ? '' : 'disabled'}>${maxed ? 'Nivel máximo' : `Mejorar (${uc} CPU)`}</button>
-      <button class="btn small" data-a="move">Mover</button>
-      <button class="btn small danger" data-a="sell">Vender (+${sellValue(t)})</button>
+      <button class="btn small" data-a="move">Mover [M]</button>
+      <button class="btn small danger" data-a="sell">Vender +${sellValue(t)} [X]</button>
     </div>`;
 }
 $('panel').addEventListener('click', (e) => {
   const a = e.target.dataset?.a, t = G?.T.find((q) => q.i === selId);
   if (!a || !t) return;
-  if (a === 'up') act({ t: 'up', id: t.i });
-  else if (a === 'sell') { act({ t: 'sell', id: t.i }); selId = null; }
-  else if (a === 'move') { placing = t.k; movingId = t.i; info('Haz clic en la nueva posición (la torre tarda 3 s en reiniciarse). Esc cancela.'); }
+  if (a === 'up') upgrade(t, +e.target.dataset.p);
+  else if (a === 'sell') sell(t);
+  else if (a === 'move') startMove(t);
 });
 
 // ---------- HUD ----------
@@ -318,14 +433,16 @@ function updateHud() {
   bar.style.background = lf > 0.5 ? 'var(--cyan)' : lf > 0.25 ? 'var(--amber)' : 'var(--pink)';
   const waiting = G.ph === 'play' && G.ic > 0;
   $('btnNext').disabled = !waiting || !!G.pa;
-  setTxt('hudNext', waiting ? `(${Math.ceil(G.ic)}s)` : '');
+  setTxt('btnAuto', G.au ? 'Auto [A]: ON' : 'Auto [A]: OFF');
+  $('btnAuto').classList.toggle('on', !!G.au);
+  setTxt('hudNext', waiting ? `${Math.ceil(G.ic)}s` : '');
   for (const k of TOWER_KEYS) {
     const s = shopBtns[k], c = buildCost(G, k);
     if (s.last !== c) { s.last = c; s.cost.textContent = c + ' CPU'; }
     s.b.classList.toggle('poor', G.money < c);
     s.b.classList.toggle('sel', placing === k && !movingId);
   }
-  if (infoTimer && now() > infoTimer) info('Mayús + clic para construir varias seguidas. Espacio: siguiente oleada. P: pausa.');
+  if (infoTimer && now() > infoTimer) info('U/I/O mejorar rama 1/2/3 · X vender · M mover · Enter chat · A automático · H todas las teclas.');
   // capas de pausa / fin
   const ov = $('overlay');
   const state = G.ph !== 'play' ? G.ph : G.pa ? 'pause' : '';
@@ -357,7 +474,7 @@ function frame() {
     time: t,
     prev: isHost ? null : prevMap,
     alpha: Math.min(1, (performance.now() - snapAt) / PUBLISH_MS),
-    hover, placing, placingLvl: mv ? mv.l : 1, movingId, selId,
+    hover, placing, placingP: mv ? mv.p : null, movingId, selId,
     valid: !!(placing && hover && cellFree(G, hover.cx, hover.cy, movingId || undefined) && (movingId || G.money >= buildCost(G, placing))),
     cursors: list,
   });

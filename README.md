@@ -37,7 +37,9 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 ## Cómo se juega
 - Uno crea la sala y pasa el código de 4 letras; los demás se unen (máximo 4).
 - CPU (dinero) y vida del servidor son compartidas. Cualquiera puede construir, mejorar, vender o mover cualquier torre.
-- Teclas: `1-8` elegir torre · clic colocar (`Mayús`+clic para varias) · `Esc` cancelar · `Espacio` siguiente oleada · `P` pausa global.
+- Cada torre tiene **3 ramas de evolución de 3 niveles** (estilo Bloons TD6): solo se pueden mejorar 2 ramas y solo una llega a nivel 3. Cada mejora cambia el ataque y el aspecto.
+- **Chat de texto**: `Enter` para escribir (en la sala de espera y en la partida).
+- Teclas: `1-8` elegir torre · clic colocar (`Mayús`+clic para varias) · `U`/`I`/`O` mejorar rama 1/2/3 · `X` vender · `M` mover · `Tab` siguiente torre · `Espacio` siguiente oleada · `A` oleadas automáticas · `P` pausa global · `H` ayuda · `Esc` cancelar.
 - 20 oleadas; jefe *Merge Conflict* en las oleadas 5, 10, 15 y 20.
 
 ## Cómo funciona por dentro
@@ -47,10 +49,10 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 
 | Archivo | Qué hace |
 |---|---|
-| `js/data.js` | Mapa, torres, enemigos y oleadas. **Aquí se equilibra el juego.** |
+| `js/data.js` | Mapa, torres (con sus 3 ramas de mejoras), enemigos y oleadas. **Aquí se equilibra el juego.** |
 | `js/sim.js` | Lógica del juego (sin DOM ni red). |
 | `js/render.js` | Dibujo en Canvas. |
-| `js/net.js` | Salas, acciones, cursores y estado con Firebase. |
+| `js/net.js` | Salas, acciones, cursores, chat y estado con Firebase. |
 | `js/main.js` | Menús, HUD, ratón/teclado y unión de todo. |
 | `js/firebase-config.js` | Tu configuración de Firebase. |
 | `js/net-mock.js` | Solo para pruebas: abre `?mock` en dos pestañas del mismo navegador para probar sin Firebase. |

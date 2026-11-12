@@ -7,6 +7,7 @@
 //    cd_rooms/CODE/s         instantánea del juego (texto JSON, la escribe el anfitrión)
 //    cd_rooms/CODE/a         cola de acciones de los jugadores (las consume el anfitrión)
 //    cd_rooms/CODE/c         { pid: { x, y, b } }  cursores
+//    cd_rooms/CODE/chat      mensajes del chat { n, s, m, at }
 // ============================================================
 import { firebaseConfig } from './firebase-config.js';
 
@@ -71,6 +72,10 @@ export async function connect() {
     },
 
     act(a) { if (code) db.push(R('a'), a); },
+    /** Envía un mensaje al chat de la sala. */
+    chat(n, slot, m) { if (code) db.push(R('chat'), { n, s: slot, m, at: db.serverTimestamp() }); },
+    /** Recibe los últimos 30 mensajes y los nuevos. */
+    onChat(cb) { unsubs.push(db.onChildAdded(db.query(R('chat'), db.limitToLast(30)), (snap) => cb(snap.val()))); },
     publish(str) { if (code) db.set(R('s'), str); },
     cursor(c) { if (code) db.set(R('c/' + pid), c); },
     setMeta(m) { return db.update(R('meta'), m); },

@@ -9,6 +9,7 @@ export async function connect() {
   let code = '';
   const subs = [];
   let actionCb = null;
+  const chatCbs = [];
   // Una clave de localStorage por dato (y por jugador) para que las pestañas no se pisen.
   const MAPS = ['players', 'c'];
   const key = (kind, id) => 'cdmock:' + code + ':' + kind + (id ? ':' + id : '');
@@ -41,6 +42,7 @@ export async function connect() {
   bc.onmessage = (ev) => {
     if (ev.data.code !== code) return;
     if (ev.data.action) { if (actionCb) actionCb(ev.data.action); return; }
+    if (ev.data.chat) { chatCbs.forEach((f) => f(ev.data.chat)); return; }
     apply(ev.data.kind, ev.data.id, ev.data.val); fire(ev.data.kind);
   };
   const api = {
@@ -66,6 +68,8 @@ export async function connect() {
     on(kind, cb) { subs.push({ kind, cb }); cb(cache[kind] ?? null); },
     onAction(cb) { actionCb = cb; return () => { actionCb = null; }; },
     act(a) { bc.postMessage({ code, action: a }); },
+    chat(n, slot, m) { const msg = { n, s: slot, m, at: Date.now() }; bc.postMessage({ code, chat: msg }); chatCbs.forEach((f) => f(msg)); },
+    onChat(cb) { chatCbs.push(cb); },
     publish(str) { put('s', '', str); },
     cursor(c) { put('c', pid, c); },
     async setMeta(m) { put('meta', '', { ...(cache.meta || {}), ...m }); },

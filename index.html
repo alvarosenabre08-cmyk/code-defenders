@@ -50,13 +50,35 @@
     </div>
     <div id="hudPlayers" class="chips"></div>
     <div class="spacer"></div>
-    <button id="btnNext" class="btn small">Siguiente oleada <span id="hudNext"></span></button>
-    <button id="btnPause" class="btn small">Pausa (P)</button>
+    <button id="btnAuto" class="btn small" title="Las oleadas salen seguidas, sin esperar">Auto [A]: OFF</button>
+    <button id="btnNext" class="btn small" title="Siguiente oleada (Espacio)">Siguiente [Espacio] <span id="hudNext"></span></button>
+    <button id="btnChat" class="btn small ghost">Chat [Enter]</button>
+    <button id="btnKeys" class="btn small ghost">Teclas [H]</button>
+    <button id="btnPause" class="btn small">Pausa [P]</button>
   </header>
 
   <div class="stage" id="stage">
     <canvas id="cv" width="1280" height="640"></canvas>
     <div id="panel" class="panel hidden"></div>
+    <div id="keys" class="keys hidden">
+      <h3>Atajos de teclado</h3>
+      <table>
+        <tr><td><kbd>1</kbd>-<kbd>8</kbd></td><td>Elegir torre para construir</td></tr>
+        <tr><td><kbd>Clic</kbd></td><td>Construir / seleccionar torre</td></tr>
+        <tr><td><kbd>Mayús</kbd>+<kbd>Clic</kbd></td><td>Construir varias seguidas</td></tr>
+        <tr><td><kbd>U</kbd> <kbd>I</kbd> <kbd>O</kbd></td><td>Mejorar rama 1 / 2 / 3</td></tr>
+        <tr><td><kbd>X</kbd> / <kbd>Supr</kbd></td><td>Vender torre</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Mover torre</td></tr>
+        <tr><td><kbd>Tab</kbd></td><td>Seleccionar la siguiente torre</td></tr>
+        <tr><td><kbd>Espacio</kbd></td><td>Siguiente oleada ya</td></tr>
+        <tr><td><kbd>A</kbd></td><td>Oleadas automáticas ON/OFF</td></tr>
+        <tr><td><kbd>P</kbd></td><td>Pausa para todos</td></tr>
+        <tr><td><kbd>Esc</kbd> / <kbd>Clic dcho.</kbd></td><td>Cancelar / deseleccionar</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Escribir en el chat</td></tr>
+        <tr><td><kbd>H</kbd></td><td>Mostrar / ocultar esta ayuda</td></tr>
+      </table>
+      <p>Cada torre tiene 3 ramas: solo puedes mejorar 2 y solo una puede llegar a nivel 3.<br>U/I/O, X y M actúan sobre la torre seleccionada o, si no hay ninguna, sobre la que tengas bajo el ratón.</p>
+    </div>
     <div id="overlay" class="overlay hidden">
       <h2 id="ovTitle"></h2>
       <p id="ovSub"></p>
@@ -66,9 +88,15 @@
 
   <footer class="shop">
     <div id="shop" class="shop-items"></div>
-    <div id="info" class="info">Elige una torre (teclas 1-8) y haz clic en el mapa. Clic en una torre para mejorarla, venderla o moverla. Esc cancela.</div>
+    <div id="info" class="info">Elige una torre (1-8) y haz clic en el mapa. Pasa el ratón por una torre: U/I/O mejorar rama 1/2/3 · X vender · M mover. Enter = chat. H = todas las teclas.</div>
   </footer>
 </section>
+
+<!-- ============ CHAT ============ -->
+<div id="chat" class="chat hidden">
+  <div id="chatLog" class="chat-log"></div>
+  <input id="chatIn" maxlength="120" placeholder="Escribe y pulsa Enter (Esc cierra)" autocomplete="off">
+</div>
 
 <script type="module" src="js/main.js"></script>
 </body>
