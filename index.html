@@ -25,7 +25,7 @@
     <button id="btnSolo" class="btn ghost">Práctica en solitario</button>
     <p id="menuMsg" class="msg"></p>
   </div>
-  <p class="hint">Defended el servidor de producción de Bugs, Memory Leaks, NullPointerExceptions, ataques DDoS y Merge Conflicts durante 20 oleadas.</p>
+  <p class="hint">Defended el servidor de Bugs, Memory Leaks, Rootkits, Ransomware, Zero-Days y Merge Conflicts. 3 mapas, 8 torres con 3 ramas de 5 tiers, parches aleatorios y combos.</p>
 </section>
 
 <!-- ============ SALA ============ -->
@@ -33,6 +33,7 @@
   <p class="tag">// Código de la sala — pásaselo a tus compañeros</p>
   <h1 id="lobbyCode" class="code">----</h1>
   <ul id="lobbyPlayers" class="players"></ul>
+  <div id="mapSel" class="maps"></div>
   <button id="btnStart" class="btn primary">Desplegar a producción (empezar)</button>
   <p id="lobbyMsg" class="msg"></p>
   <button id="btnLeave" class="btn ghost">Salir</button>
@@ -41,8 +42,8 @@
 <!-- ============ JUEGO ============ -->
 <section id="game" class="hidden">
   <header class="hud">
-    <div class="hud-title">CODE<span>_</span>DEFENDERS</div>
     <div class="stat">SALA <b id="hudCode">----</b></div>
+    <div class="stat">MAPA <b id="hudMap">-</b></div>
     <div class="stat">OLEADA <b id="hudWave">0/20</b></div>
     <div class="stat cpu">CPU <b id="hudCpu">0</b></div>
     <div class="stat life">SERVIDOR
@@ -50,45 +51,71 @@
     </div>
     <div id="hudPlayers" class="chips"></div>
     <div class="spacer"></div>
+    <button id="btnSpeed" class="btn small" title="Cambia la velocidad del juego para todos: x1, x2, x4, x6">Velocidad x1 [F]</button>
     <button id="btnAuto" class="btn small" title="Las oleadas salen seguidas, sin esperar">Auto [A]: OFF</button>
-    <button id="btnNext" class="btn small" title="Siguiente oleada (Espacio)">Siguiente [Espacio] <span id="hudNext"></span></button>
-    <button id="btnChat" class="btn small ghost">Chat [Enter]</button>
-    <button id="btnKeys" class="btn small ghost">Teclas [H]</button>
+    <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra un bonus por los segundos saltados">Saltar [Espacio] <span id="hudNext"></span></button>
+    <button id="btnChat" class="btn small ghost">Chat</button>
+    <button id="btnKeys" class="btn small ghost">Ayuda [H]</button>
     <button id="btnPause" class="btn small">Pausa [P]</button>
   </header>
 
   <div class="stage" id="stage">
     <canvas id="cv" width="1280" height="640"></canvas>
     <div id="panel" class="panel hidden"></div>
+    <div id="abil" class="abilbar"></div>
     <div id="keys" class="keys hidden">
-      <h3>Atajos de teclado</h3>
-      <table>
-        <tr><td><kbd>1</kbd>-<kbd>8</kbd></td><td>Elegir torre para construir</td></tr>
-        <tr><td><kbd>Clic</kbd></td><td>Construir / seleccionar torre</td></tr>
-        <tr><td><kbd>Mayús</kbd>+<kbd>Clic</kbd></td><td>Construir varias seguidas</td></tr>
-        <tr><td><kbd>U</kbd> <kbd>I</kbd> <kbd>O</kbd></td><td>Mejorar rama 1 / 2 / 3</td></tr>
-        <tr><td><kbd>X</kbd> / <kbd>Supr</kbd></td><td>Vender torre</td></tr>
-        <tr><td><kbd>M</kbd></td><td>Mover torre</td></tr>
-        <tr><td><kbd>Tab</kbd></td><td>Seleccionar la siguiente torre</td></tr>
-        <tr><td><kbd>Espacio</kbd></td><td>Siguiente oleada ya</td></tr>
-        <tr><td><kbd>A</kbd></td><td>Oleadas automáticas ON/OFF</td></tr>
-        <tr><td><kbd>P</kbd></td><td>Pausa para todos</td></tr>
-        <tr><td><kbd>Esc</kbd> / <kbd>Clic dcho.</kbd></td><td>Cancelar / deseleccionar</td></tr>
-        <tr><td><kbd>Enter</kbd></td><td>Escribir en el chat</td></tr>
-        <tr><td><kbd>H</kbd></td><td>Mostrar / ocultar esta ayuda</td></tr>
-      </table>
-      <p>Cada torre tiene 3 ramas: solo puedes mejorar 2 y solo una puede llegar a nivel 3.<br>U/I/O, X y M actúan sobre la torre seleccionada o, si no hay ninguna, sobre la que tengas bajo el ratón.</p>
+      <div class="cols">
+        <div>
+          <h3>Teclas</h3>
+          <table>
+            <tr><td><kbd>1</kbd>-<kbd>8</kbd></td><td>Elegir torre</td></tr>
+            <tr><td><kbd>Mayús</kbd>+<kbd>Clic</kbd></td><td>Construir varias seguidas</td></tr>
+            <tr><td><kbd>U</kbd> <kbd>I</kbd> <kbd>O</kbd></td><td>Mejorar rama 1 / 2 / 3</td></tr>
+            <tr><td><kbd>T</kbd></td><td>Cambiar a quién dispara</td></tr>
+            <tr><td><kbd>Q</kbd></td><td>Usar habilidad activa</td></tr>
+            <tr><td><kbd>X</kbd> / <kbd>Supr</kbd></td><td>Vender torre / eliminar código legacy</td></tr>
+            <tr><td><kbd>M</kbd></td><td>Mover torre</td></tr>
+            <tr><td><kbd>Tab</kbd></td><td>Siguiente torre</td></tr>
+            <tr><td><kbd>Espacio</kbd></td><td>Saltar a la siguiente oleada (+CPU)</td></tr>
+            <tr><td><kbd>A</kbd></td><td>Oleadas automáticas</td></tr>
+            <tr><td><kbd>F</kbd></td><td>Velocidad x1 → x2 → x4 → x6</td></tr>
+            <tr><td><kbd>P</kbd></td><td>Pausa para todos</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>Chat</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Cancelar</td></tr>
+          </table>
+          <p>Las teclas de torre actúan sobre la seleccionada o sobre la que tengas bajo el ratón.</p>
+        </div>
+        <div>
+          <h3>Mejoras (5-2-0)</h3>
+          <p>3 ramas de 5 tiers. Máximo 2 ramas por torre: una hasta Tier 5 y la otra hasta Tier 2. Solo puede haber un Tier 5 de cada rama en el mapa.<br>
+          <b>Rama 1</b> poder bruto · <b>Rama 2</b> utilidad, detección y <b>habilidad activa</b> en Tier 4 · <b>Rama 3</b> cadencia y efectos.</p>
+          <h3>Enemigos especiales</h3>
+          <p><b style="color:#9aa7ff">Rootkit (ofuscado)</b>: solo lo ven torres con detección (Debugger, rama 2).<br>
+          <b style="color:#c0c8d8">Ransomware (blindado)</b>: frena disparos débiles; usa explosivos, ácido, fuego o perforantes.<br>
+          <b style="color:#ff8a3d">Zero-Day (volador)</b>: va recto al servidor; ignora Threads, Docker y trampas.<br>
+          <b style="color:#5affc8">Memory Leak</b>: se regenera salvo que arda.</p>
+          <h3>Combos</h3>
+          <p><b style="color:#4fc3ff">Cortocircuito</b>: Garbage Collector (refrigera) + Load Balancer (eléctrico) = +60% de daño y aturde.<br>
+          <b style="color:#ff9d00">Stack Overflow</b>: Docker (enreda) + fuego (Firewall rama 3, sobrecalentamiento o bombas) = explosión en área.</p>
+        </div>
+      </div>
+    </div>
+    <div id="cards" class="cards hidden">
+      <h2>ELIGE UN PARCHE</h2>
+      <p id="cardSub"></p>
+      <div id="cardList" class="card-list"></div>
     </div>
     <div id="overlay" class="overlay hidden">
       <h2 id="ovTitle"></h2>
       <p id="ovSub"></p>
       <button id="ovBtn" class="btn primary"></button>
+      <button id="ovBtn2" class="btn">Elegir otro mapa</button>
     </div>
   </div>
 
   <footer class="shop">
     <div id="shop" class="shop-items"></div>
-    <div id="info" class="info">Elige una torre (1-8) y haz clic en el mapa. Pasa el ratón por una torre: U/I/O mejorar rama 1/2/3 · X vender · M mover. Enter = chat. H = todas las teclas.</div>
+    <div id="info" class="info"></div>
   </footer>
 </section>
 
