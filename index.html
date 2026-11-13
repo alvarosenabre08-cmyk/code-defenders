@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Code Defenders: The Production Release</title>
+<title>Leones TD — Defensa de la Sabana</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -11,11 +11,11 @@
 
 <!-- ============ MENÚ ============ -->
 <section id="menu" class="screen">
-  <h1 class="logo">CODE<span>_</span>DEFENDERS</h1>
-  <p class="tag">// The Production Release — Tower Defense cooperativo para 4 devs</p>
+  <h1 class="logo">LEONES <span>TD</span></h1>
+  <p class="tag">Defensa de la Sabana · cooperativo para 4 jugadores</p>
   <div class="card">
     <label>Tu nombre
-      <input id="inName" maxlength="12" placeholder="dev_1" autocomplete="off">
+      <input id="inName" maxlength="12" placeholder="leon_1" autocomplete="off">
     </label>
     <button id="btnCreate" class="btn primary">Crear sala</button>
     <div class="row">
@@ -25,16 +25,16 @@
     <button id="btnSolo" class="btn ghost">Práctica en solitario</button>
     <p id="menuMsg" class="msg"></p>
   </div>
-  <p class="hint">Defended el servidor de Bugs, Memory Leaks, Rootkits, Ransomware, Zero-Days y Merge Conflicts. 3 mapas, 8 torres con 3 ramas de 5 tiers, parches aleatorios y combos.</p>
+  <p class="hint">¡Los barriles ruedan hacia la guarida! Colocad leones, mejoradlos por 3 ramas de 5 niveles y resistid en 3 mapas: Sabana, Selva y Volcán.</p>
 </section>
 
 <!-- ============ SALA ============ -->
 <section id="lobby" class="screen hidden">
-  <p class="tag">// Código de la sala — pásaselo a tus compañeros</p>
+  <p class="tag">Código de la sala: pásaselo a tu manada</p>
   <h1 id="lobbyCode" class="code">----</h1>
   <ul id="lobbyPlayers" class="players"></ul>
   <div id="mapSel" class="maps"></div>
-  <button id="btnStart" class="btn primary">Desplegar a producción (empezar)</button>
+  <button id="btnStart" class="btn primary">¡A defender la guarida!</button>
   <p id="lobbyMsg" class="msg"></p>
   <button id="btnLeave" class="btn ghost">Salir</button>
 </section>
@@ -45,15 +45,15 @@
     <div class="stat">SALA <b id="hudCode">----</b></div>
     <div class="stat">MAPA <b id="hudMap">-</b></div>
     <div class="stat">OLEADA <b id="hudWave">0/20</b></div>
-    <div class="stat cpu">CPU <b id="hudCpu">0</b></div>
-    <div class="stat life">SERVIDOR
+    <div class="stat cpu"><i class="coin"></i><b id="hudCpu">0</b></div>
+    <div class="stat life"><i class="heart">♥</i>
       <div class="bar"><div id="hudLifeBar"></div></div><b id="hudLife">100</b>
     </div>
     <div id="hudPlayers" class="chips"></div>
     <div class="spacer"></div>
     <button id="btnSpeed" class="btn small" title="Cambia la velocidad del juego para todos: x1, x2, x4, x6">Velocidad x1 [F]</button>
     <button id="btnAuto" class="btn small" title="Las oleadas salen seguidas, sin esperar">Auto [A]: OFF</button>
-    <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra un bonus por los segundos saltados">Saltar [Espacio] <span id="hudNext"></span></button>
+    <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra oro por los segundos saltados">Saltar [Espacio] <span id="hudNext"></span></button>
     <button id="btnChat" class="btn small ghost">Chat</button>
     <button id="btnKeys" class="btn small ghost">Ayuda [H]</button>
     <button id="btnPause" class="btn small">Pausa [P]</button>
@@ -71,12 +71,12 @@
             <tr><td><kbd>1</kbd>-<kbd>8</kbd></td><td>Elegir torre</td></tr>
             <tr><td><kbd>Mayús</kbd>+<kbd>Clic</kbd></td><td>Construir varias seguidas</td></tr>
             <tr><td><kbd>U</kbd> <kbd>I</kbd> <kbd>O</kbd></td><td>Mejorar rama 1 / 2 / 3</td></tr>
-            <tr><td><kbd>T</kbd></td><td>Cambiar a quién dispara</td></tr>
-            <tr><td><kbd>Q</kbd></td><td>Usar habilidad activa</td></tr>
-            <tr><td><kbd>X</kbd> / <kbd>Supr</kbd></td><td>Vender torre / eliminar código legacy</td></tr>
+            <tr><td><kbd>T</kbd></td><td>Cambiar a quién ataca</td></tr>
+            <tr><td><kbd>Q</kbd></td><td>Usar habilidad</td></tr>
+            <tr><td><kbd>X</kbd> / <kbd>Supr</kbd></td><td>Vender torre / quitar obstáculo</td></tr>
             <tr><td><kbd>M</kbd></td><td>Mover torre</td></tr>
             <tr><td><kbd>Tab</kbd></td><td>Siguiente torre</td></tr>
-            <tr><td><kbd>Espacio</kbd></td><td>Saltar a la siguiente oleada (+CPU)</td></tr>
+            <tr><td><kbd>Espacio</kbd></td><td>Saltar a la siguiente oleada (+oro)</td></tr>
             <tr><td><kbd>A</kbd></td><td>Oleadas automáticas</td></tr>
             <tr><td><kbd>F</kbd></td><td>Velocidad x1 → x2 → x4 → x6</td></tr>
             <tr><td><kbd>P</kbd></td><td>Pausa para todos</td></tr>
@@ -87,21 +87,22 @@
         </div>
         <div>
           <h3>Mejoras (5-2-0)</h3>
-          <p>3 ramas de 5 tiers. Máximo 2 ramas por torre: una hasta Tier 5 y la otra hasta Tier 2. Solo puede haber un Tier 5 de cada rama en el mapa.<br>
-          <b>Rama 1</b> poder bruto · <b>Rama 2</b> utilidad, detección y <b>habilidad activa</b> en Tier 4 · <b>Rama 3</b> cadencia y efectos.</p>
-          <h3>Enemigos especiales</h3>
-          <p><b style="color:#9aa7ff">Rootkit (ofuscado)</b>: solo lo ven torres con detección (Debugger, rama 2).<br>
-          <b style="color:#c0c8d8">Ransomware (blindado)</b>: frena disparos débiles; usa explosivos, ácido, fuego o perforantes.<br>
-          <b style="color:#ff8a3d">Zero-Day (volador)</b>: va recto al servidor; ignora Threads, Docker y trampas.<br>
-          <b style="color:#5affc8">Memory Leak</b>: se regenera salvo que arda.</p>
+          <p>3 ramas de 5 niveles. Máximo 2 ramas por torre: una hasta el nivel 5 y la otra hasta el 2. Solo puede haber un nivel 5 de cada rama en el mapa.<br>
+          <b>Rama 1</b> poder bruto · <b>Rama 2</b> utilidad, detección y <b>habilidad</b> en el nivel 4 · <b>Rama 3</b> cadencia y efectos.</p>
+          <h3>Barriles especiales</h3>
+          <p><b style="color:#a8d06a">Camuflado</b>: solo lo ven torres con detección (León Cazador, rama 2).<br>
+          <b style="color:#c9d1d9">De hierro (blindado)</b>: frena los golpes débiles; usa explosiones, ácido, fuego o perforantes.<br>
+          <b style="color:#ffb066">Volador</b>: va recto a la guarida; ignora leonas, brea y trampas.<br>
+          <b style="color:#a9e06a">Musgoso</b>: se repara solo salvo que arda.<br>
+          <b style="color:#d9c9f7">Fantasma</b>: las leonas no pueden frenarlo.</p>
           <h3>Combos</h3>
-          <p><b style="color:#4fc3ff">Cortocircuito</b>: Garbage Collector (refrigera) + Load Balancer (eléctrico) = +60% de daño y aturde.<br>
-          <b style="color:#ff9d00">Stack Overflow</b>: Docker (enreda) + fuego (Firewall rama 3, sobrecalentamiento o bombas) = explosión en área.</p>
+          <p><b style="color:#5ae0f0">Descarga</b>: León Cañonero (moja) + León Chamán (rayo) = +60% de daño y aturde.<br>
+          <b style="color:#ff9d4a">Explosión de aceite</b>: León Alquimista (aceita) + fuego (Arquero rama 3, brasas, lava o dinamita) = explosión en área.</p>
         </div>
       </div>
     </div>
     <div id="cards" class="cards hidden">
-      <h2>ELIGE UN PARCHE</h2>
+      <h2>ELIGE UNA RELIQUIA</h2>
       <p id="cardSub"></p>
       <div id="cardList" class="card-list"></div>
     </div>

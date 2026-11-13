@@ -1,9 +1,9 @@
 // ============================================================
-//  Code Defenders — simulación (solo la ejecuta el anfitrión de la sala)
+//  Leones TD — simulación (solo la ejecuta el anfitrión de la sala)
 //  Sin DOM ni red: estado puro + step() + applyAction() + pack()/unpack().
 // ============================================================
 import {
-  CELL, COLS, ROWS, MAPS, SPEEDS, MAX_TIER, TOWERS, TOWER_KEYS, ENEMIES, ENEMY_KEYS, CARDS,
+  CELL, COLS, ROWS, MAPS, SPEEDS, MAX_TIER, TOWERS, TOWER_KEYS, ENEMIES, ENEMY_KEYS, CARDS, ABIL,
   pathPos, nearestD, genWave, hpMult, waveBonus, skipBonus, stats, pathLock, skin, calcMods,
 } from './data.js';
 
@@ -36,7 +36,7 @@ export function upgradeCost(S, t, i) {
 export function lockReason(S, t, i) {
   const l = pathLock(t.p, i);
   if (l) return l;
-  if (t.p[i] === MAX_TIER - 1 && S.T.some((q) => q !== t && q.k === t.k && q.p[i] >= MAX_TIER)) return 'Ya existe un Tier 5 de esta rama en el mapa';
+  if (t.p[i] === MAX_TIER - 1 && S.T.some((q) => q !== t && q.k === t.k && q.p[i] >= MAX_TIER)) return 'Ya hay un nivel 5 de esta rama en el mapa';
   return '';
 }
 export const sellValue = (t) => Math.floor(t.inv * 0.7);
@@ -133,7 +133,7 @@ export function applyAction(S, a) {
       S.md.push(id);
       if (CARDS[id].now) CARDS[id].now(S);
       S._m = calcMods(S.md); S.cd = null;
-      S._fx.push(['t', 640, 150, 'PARCHE: ' + CARDS[id].n, '#b6ff3f', 2.2]);
+      S._fx.push(['t', 640, 150, 'RELIQUIA: ' + CARDS[id].n, '#ffe14a', 2.2]);
       return true;
     }
     case 'auto':
@@ -215,7 +215,7 @@ export function applyAction(S, a) {
 /** Empieza ya la siguiente oleada y paga el bonus por los segundos saltados. */
 function callEarly(S, left) {
   const bonus = Math.round(skipBonus(S.w, S.ic - left) * S._m.wave);
-  if (bonus > 0) { S.money += bonus; S._fx.push(['t', 640, 340, `+${bonus} CPU por saltar`, '#ffe66b', 1.4]); }
+  if (bonus > 0) { S.money += bonus; S._fx.push(['t', 640, 340, `+${bonus} de oro por saltar`, '#ffe14a', 1.4]); }
   S.ic = left;
 }
 
@@ -281,7 +281,7 @@ function useAbility(S, t) {
       break;
     }
   }
-  S._fx.push(['t', x, y - 30, s.ab === 'kill' ? 'kill -9' : 'HABILIDAD', col, 1]);
+  S._fx.push(['t', x, y - 34, '¡' + ABIL[s.ab].n + '!', '#ffe14a', 1.1]);
   return true;
 }
 
@@ -319,12 +319,12 @@ function vulnE(e, v, t) {
   if (!v) return;
   if (e.vt <= 0 || v >= e.vu) { e.vu = v; e.vt = Math.max(e.vt, t); }
 }
-/** COMBO Stack Overflow: un enemigo ENREDADO que recibe fuego explota en área. */
+/** COMBO Explosión de aceite: un barril ACEITADO que recibe fuego explota en área. */
 function ignite(S, e) {
   if (e.oi <= 0 || e.h <= 0) return;
   e.oi = 0; e.oc = 3;
   S._boom.push([e._x, e._y, Math.min(900, 25 + e.m * 0.1) * S._m.combo, 55, 1, '#ff9d00']);
-  S._fx.push(['t', Math.round(e._x), Math.round(e._y) - 18, 'STACK OVERFLOW', '#ff9d00', 0.8]);
+  S._fx.push(['t', Math.round(e._x), Math.round(e._y) - 18, '¡BOOM!', '#ff9d00', 0.8]);
 }
 function burnE(S, e, dps, t, fire) {
   if (!dps) return;
@@ -403,7 +403,7 @@ export function step(S, dt) {
     S.ic -= dt;
     if (S.ic <= 0) {
       S.ic = 0; S.w++; S.wt = 0; S.si = 0; S._fx.push(['w', S.w]);
-      for (const en of M.entries) if (en.from === S.w && S.w > 1) S._fx.push(['t', 640, 190, '¡NUEVO PUERTO ABIERTO!', '#ff3f5a', 3]);
+      for (const en of M.entries) if (en.from === S.w && S.w > 1) S._fx.push(['t', 640, 190, '¡SE HA ABIERTO UNA CUEVA!', '#ff5a4a', 3]);
     }
   } else {
     const q = genWave(S.map, S.w);
@@ -543,7 +543,7 @@ export function step(S, dt) {
         if (t.c > 0) break;
         const list = pick(S, x, y, range, det, t.tg, s.targets);
         if (!list.length) break;
-        t.c = s.rate * cd;
+        t.c = s.rate * cd; t.a = Math.atan2(list[0]._y - y, list[0]._x - x);
         for (const e of list) {
           const cx = e._x, cy = e._y;
           S._fx.push(['a', x, y, Math.round(cx), Math.round(cy), Math.round(s.splash), col]);
@@ -582,7 +582,7 @@ export function step(S, dt) {
         if (t.c > 0) break;
         const starts = pick(S, x, y, range, det, t.tg, s.chains);
         if (!starts.length) break;
-        t.c = s.rate * cd;
+        t.c = s.rate * cd; t.a = Math.atan2(starts[0]._y - y, starts[0]._x - x);
         const done = new Set();
         for (let e of starts) {
           if (done.has(e.i)) continue;
@@ -593,7 +593,7 @@ export function step(S, dt) {
             const ox = e._x, oy = e._y;
             slowE(e, s.slow, 1.5); stunE(e, s.stun);
             if (e.wt > 0) {
-              // COMBO Cortocircuito: enemigo refrigerado + electricidad
+              // COMBO Descarga: barril mojado + rayo
               if (e.cc <= 0) { e.cc = 2; stunE(e, 0.25); S._fx.push(['z', Math.round(ox), Math.round(oy)]); }
               hit(e, dmg * s.wetM * m.shock);
             } else hit(e, dmg);

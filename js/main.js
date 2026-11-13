@@ -1,5 +1,5 @@
 // ============================================================
-//  Code Defenders — interfaz, entrada del jugador y pegamento con la red
+//  Leones TD — interfaz, entrada del jugador y pegamento con la red
 //
 //  Modelo de red: el navegador del ANFITRIÓN ejecuta la simulación y publica
 //  instantáneas; los demás envían acciones y dibujan lo que reciben.
@@ -49,7 +49,7 @@ if (!isConfigured() && !MOCK) {
   $('menuMsg').textContent = 'Multijugador desactivado: falta pegar la configuración de Firebase en js/firebase-config.js';
 }
 function readName() {
-  myName = ($('inName').value.trim() || 'dev_' + Math.floor(Math.random() * 90 + 10)).slice(0, 12);
+  myName = ($('inName').value.trim() || 'leon_' + Math.floor(Math.random() * 90 + 10)).slice(0, 12);
   localStorage.setItem('cd_name', myName);
 }
 async function getNet() {
@@ -125,7 +125,7 @@ const mapBtns = MAPS.map((M, i) => {
   b.className = 'map';
   const th = document.createElement('canvas'); th.width = 256; th.height = 128;
   const txt = document.createElement('div');
-  txt.innerHTML = `<b style="color:${M.theme.a}">${i + 1}. ${M.name}</b> <span class="diff d${i}">${M.diff}</span><small>${M.tag} · ${M.waves} oleadas · ${M.life} de vida</small><p>${M.desc}</p>`;
+  txt.innerHTML = `<b style="color:${M.theme.a}">${i + 1}. ${M.name}</b> <span class="diff d${i}">${M.diff}</span><small>${M.tag} · ${M.waves} oleadas · ${M.life} vidas</small><p>${M.desc}</p>`;
   b.append(th, txt);
   b.onclick = () => {
     if (!isHost) return;
@@ -298,22 +298,22 @@ function hoverText() {
   const t = towerAt(G, hover.cx, hover.cy);
   if (t) return `${TOWERS[t.k].name} ${t.p.join('-')}: U/I/O mejorar rama · T objetivo · Q habilidad · M mover · X vender`;
   const oi = M.obsAt.get(key);
-  if (oi !== undefined && !G.ob[oi]) return `Código legacy: estorba. Haz clic y elimínalo por ${M.obs[oi][2]} CPU (o pulsa X).` + (M.padAt.has(key) ? ' Debajo hay un rack de GPU (+30% de daño).' : '');
-  if (M.padAt.has(key)) return 'Rack de GPU: la torre que construyas aquí hace +30% de daño.';
+  if (oi !== undefined && !G.ob[oi]) return `Obstáculo: estorba. Haz clic y quítalo por ${M.obs[oi][2]} de oro (o pulsa X).` + (M.padAt.has(key) ? ' Debajo hay un tótem de poder (+30% de daño).' : '');
+  if (M.padAt.has(key)) return 'Tótem de poder: la torre que construyas aquí hace +30% de daño.';
   const ti = M.trapAt.get(key);
   if (ti !== undefined) {
     return M.traps[ti].t === 'bomb'
-      ? 'Bomba lógica: haz clic para detonarla. Daño explosivo en área, aturde y prende a los enemigos enredados. Recarga 50 s.'
-      : 'Ventana de mantenimiento: haz clic para cerrar el paso 4 s (los enemigos se amontonan). Recarga 45 s.';
+      ? 'Dinamita: haz clic para detonarla. Explosión en área, aturde y prende a los barriles aceitados. Recarga 50 s.'
+      : 'Puente levadizo: haz clic para levantarlo 4 s (los barriles se amontonan delante). Recarga 45 s.';
   }
-  if (M.swAt.has(key)) return 'Router: haz clic para desviar el tráfico por la otra rama. Recarga 8 s.';
+  if (M.swAt.has(key)) return 'Señal del cruce: haz clic para desviar los barriles por la otra rama. Recarga 8 s.';
   const z = M.zoneAt.get(key);
-  if (z === 'heat') return 'Sobrecalentamiento: quema a los enemigos que pasan (más cuanto más lentos vayan) y hace explotar a los enredados.';
-  if (z === 'cool') return 'Fuga de refrigerante: deja REFRIGERADOS a los enemigos. El Load Balancer les hace Cortocircuito.';
+  if (z === 'heat') return 'Brasas / lava: queman a los barriles que pasan (más cuanto más lentos vayan) y hacen explotar a los aceitados.';
+  if (z === 'cool') return 'Río: deja MOJADOS a los barriles. El León Chamán les hace una Descarga.';
   return '';
 }
 function idleText() {
-  if (G.cd) return 'Elegid un parche: cualquiera del equipo puede escoger.';
+  if (G.cd) return 'Elegid una reliquia: cualquiera de la manada puede escoger.';
   if (G.ph === 'play' && G.ic > 0) return previewText();
   return 'U/I/O mejorar rama · T objetivo · Q habilidad · X vender · M mover · F velocidad · Espacio saltar · H ayuda';
 }
@@ -323,8 +323,9 @@ const shopBtns = {};
 for (const [i, k] of TOWER_KEYS.entries()) {
   const d = TOWERS[k], b = document.createElement('button');
   b.className = 'item';
-  const ic = document.createElement('canvas'); ic.width = ic.height = 44;
-  drawTower(ic.getContext('2d'), k, 22, 20, null, -0.6, 0.4, false);
+  const ic = document.createElement('canvas'); ic.width = ic.height = 112;
+  const g = ic.getContext('2d'); g.scale(1.68, 1.68);
+  drawTower(g, k, 34, 33, null, 0.35, 0, false);
   const txt = document.createElement('div');
   txt.innerHTML = `<b style="color:${d.color}">${d.name}</b><span class="cost"></span> <span class="key">[${i + 1}]</span>`;
   b.append(ic, txt);
@@ -360,15 +361,15 @@ cv.addEventListener('pointerdown', (e) => {
   if (G.ph !== 'play' || G.cd) return;
   const M = MAPS[G.map], key = cy * COLS + cx, oi = M.obsAt.get(key), hasOb = oi !== undefined && !G.ob[oi];
   if (placing) {
-    if (hasOb) return info('Ahí hay código legacy: elimínalo primero (clic sobre él sin torre elegida, o X).', true);
+    if (hasOb) return info('Ahí hay un obstáculo: quítalo primero (clic sobre él sin torre elegida, o X).', true);
     if (movingId) {
       if (!cellFree(G, cx, cy, movingId)) return info('Ahí no se puede colocar.', true);
       act({ t: 'move', id: movingId, cx, cy });
       selId = movingId; placing = null; movingId = null;
     } else {
       if (!underLimit(G, placing)) return info(`Máximo ${TOWERS[placing].max} ${TOWERS[placing].name} por partida.`, true);
-      if (!cellFree(G, cx, cy)) return info('Ahí no se puede construir (ruta, servidor, estructura u ocupado).', true);
-      if (G.money < buildCost(G, placing)) return info('CPU insuficiente.', true);
+      if (!cellFree(G, cx, cy)) return info('Ahí no se puede construir (camino, guarida, estructura u ocupado).', true);
+      if (G.money < buildCost(G, placing)) return info('Oro insuficiente.', true);
       act({ t: 'build', k: placing, cx, cy });
       if (!e.shiftKey) placing = null; // Mayús + clic para seguir construyendo
     }
@@ -382,13 +383,13 @@ cv.addEventListener('pointerdown', (e) => {
   if (ti !== undefined) {
     if (G.tr[ti].c > 0) return info(`Recargando: ${Math.ceil(G.tr[ti].c)} s.`, true);
     act({ t: 'trap', i: ti });
-    return info(M.traps[ti].t === 'bomb' ? '¡Bomba lógica detonada!' : 'Ventana de mantenimiento: paso cerrado 4 s.');
+    return info(M.traps[ti].t === 'bomb' ? '¡Dinamita detonada!' : 'Puente levantado: paso cerrado 4 s.');
   }
   const si = M.swAt.get(key);
   if (si !== undefined) {
-    if (G.swc > 0) return info(`El router se está reconfigurando: ${Math.ceil(G.swc)} s.`, true);
+    if (G.swc > 0) return info(`La señal aún no se puede girar: ${Math.ceil(G.swc)} s.`, true);
     act({ t: 'sw', i: si });
-    info('Router conmutado: el tráfico nuevo irá por la otra rama.');
+    info('Señal girada: los barriles irán por la otra rama.');
   }
 });
 
@@ -412,21 +413,21 @@ function upgrade(t, i) {
   const P = TOWERS[t.k].paths[i], lock = lockReason(G, t, i);
   if (lock) return info(`${P.name}: ${lock}.`, true);
   const cost = upgradeCost(G, t, i), u = P.ups[t.p[i]];
-  if (G.money < cost) return info(`CPU insuficiente: "${u.n}" cuesta ${cost}.`, true);
+  if (G.money < cost) return info(`Oro insuficiente: "${u.n}" cuesta ${cost}.`, true);
   act({ t: 'up', id: t.i, p: i });
-  info(`${TOWERS[t.k].name} → ${u.n} (Tier ${t.p[i] + 1}): ${u.d}`);
+  info(`${TOWERS[t.k].name} → ${u.n} (nivel ${t.p[i] + 1}): ${u.d}`);
 }
 function sell(t) {
   if (!t) return info(NO_TOWER, true);
   act({ t: 'sell', id: t.i });
-  info(`${TOWERS[t.k].name} vendida (+${sellValue(t)} CPU).`);
+  info(`${TOWERS[t.k].name}: vendido por ${sellValue(t)} de oro.`);
   if (selId === t.i) selId = null;
 }
 function clearOb(i) {
   const o = MAPS[G.map].obs[i];
-  if (G.money < o[2]) return info(`CPU insuficiente: eliminar el código legacy cuesta ${o[2]}.`, true);
+  if (G.money < o[2]) return info(`Oro insuficiente: quitar el obstáculo cuesta ${o[2]}.`, true);
   act({ t: 'clear', i });
-  info('Código legacy eliminado: ya se puede construir ahí.');
+  info('Obstáculo eliminado: ya se puede construir ahí.');
   selOb = -1;
 }
 function startMove(t) {
@@ -442,7 +443,7 @@ function cycleTarget(t) {
 function ability(t) {
   if (!t) return info(NO_TOWER, true);
   const s = tStats(t);
-  if (!s.ab) return info('Esta torre no tiene habilidad activa (se desbloquea en el Tier 4 de la rama 2).', true);
+  if (!s.ab) return info('Esta torre no tiene habilidad activa (se desbloquea en el nivel 4 de la rama 2).', true);
   if (t.ac > 0) return info(`${ABIL[s.ab].n}: recargando, ${Math.ceil(t.ac)} s.`, true);
   act({ t: 'abil', id: t.i });
   info(`¡${ABIL[s.ab].n}! — ${ABIL[s.ab].d}.`);
@@ -518,21 +519,21 @@ const r0 = (n) => Math.round(n * 10) / 10;
 function statLines(t, st) {
   const L = [];
   if (st.dmg) L.push(`Daño ${Math.round(st.dmg)} cada ${r0(st.rate)}s${st.targets > 1 ? ` ×${st.targets}` : ''}`);
-  if (st.dps) L.push(`${Math.round(st.dps)} daño/s · congela ${r0(st.stun)}s cada ${st.cycle}s`);
-  if (st.units) L.push(`${st.units} threads · ${Math.round(st.uhp)} vida · ${r0(st.udmg)} daño`);
-  if (st.sdmg) L.push(`Disparo ${Math.round(st.sdmg)} cada ${r0(st.srate)}s`);
-  if (st.buff) L.push(`Aura +${Math.round(st.buff * 100)}% daño`);
+  if (st.dps) L.push(`${Math.round(st.dps)} daño/s · atrapa ${r0(st.stun)}s cada ${st.cycle}s`);
+  if (st.units) L.push(`${st.units} leonas · ${Math.round(st.uhp * G._m.thread)} vida · ${r0(st.udmg)} daño`);
+  if (st.sdmg) L.push(`Lanza ${Math.round(st.sdmg)} cada ${r0(st.srate)}s`);
+  if (st.buff) L.push(`Tambor +${Math.round(st.buff * 100)}% daño`);
   if (st.rateBuff) L.push(`+${Math.round(st.rateBuff * 100)}% cadencia`);
-  if (st.hops) L.push(`${st.hops} rebotes${st.chains > 1 ? ` ×${st.chains} cadenas` : ''}`);
+  if (st.hops) L.push(`${st.hops} saltos${st.chains > 1 ? ` ×${st.chains} rayos` : ''}`);
   if (st.burn) L.push(`Quema ${st.burn}/s`);
-  if (st.income) L.push(`+${Math.round(st.income * G._m.tdm.backup)} CPU cada ${st.period}s`);
-  if (st.heal) L.push(`+${st.heal} vida/oleada`);
+  if (st.income) L.push(`+${Math.round(st.income * G._m.tdm.backup)} de oro cada ${st.period}s`);
+  if (st.heal) L.push(`+${st.heal} vidas/oleada`);
   if (t.k !== 'backup') L.push(`Alcance ${Math.round(tRange(G, t))}`);
   const tags = [];
-  if (st.detect || t._det || G._m.detect) tags.push('ve ofuscados');
+  if (st.detect || t._det || G._m.detect) tags.push('ve camuflados');
   if (st.pierce + (t._ap || 0) + G._m.pierce > 0 && t.k !== 'backup') tags.push(st.pierce >= 99 ? 'ignora blindaje' : `perfora ${st.pierce + (t._ap || 0) + G._m.pierce}`);
-  if (t._pad) tags.push('rack GPU +30%');
-  if (t._b) tags.push(`Linter +${Math.round(t._b * 100)}%`);
+  if (t._pad) tags.push('tótem +30%');
+  if (t._b) tags.push(`tambor +${Math.round(t._b * 100)}%`);
   return L.join(' · ') + (tags.length ? `<br><span class="tags">${tags.join(' · ')}</span>` : '');
 }
 const canTarget = (t, st) => ['firewall', 'gc', 'debugger', 'balancer'].includes(t.k) || st.shoot;
@@ -548,10 +549,10 @@ function updatePanel() {
       if (sig === panelSig) return;
       panelSig = sig;
       p.classList.remove('hidden'); p.classList.toggle('left', o[0] > 16);
-      p.innerHTML = `<h3 style="color:#9aa7ff">Código legacy</h3>
-        <p>Nadie sabe qué hace, pero ocupa un buen sitio. Elimínalo para poder construir aquí.</p>
-        ${pad ? '<p style="color:#ffe66b">Debajo hay un rack de GPU: la torre que pongas hará +30% de daño.</p>' : ''}
-        <div class="btns"><button class="btn small" data-a="clear" ${can ? '' : 'disabled'}>Eliminar · ${o[2]} CPU [X]</button></div>`;
+      p.innerHTML = `<h3 style="color:#ffe14a">Obstáculo</h3>
+        <p>Ocupa un buen sitio. Quítalo para poder construir aquí.</p>
+        ${pad ? '<p style="color:#ffe14a">Debajo hay un tótem de poder: la torre que pongas hará +30% de daño.</p>' : ''}
+        <div class="btns"><button class="btn small wide" data-a="clear" ${can ? '' : 'disabled'}>Quitar · ${o[2]} de oro [X]</button></div>`;
       return;
     }
     selOb = -1;
@@ -574,13 +575,13 @@ function updatePanel() {
   p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
     <p class="sub">${d.name}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
     <p style="color:var(--text)">${statLines(t, st)}</p>
-    ${t.k === 'thread' && t._rd < 0 ? '<p style="color:var(--pink)">¡Demasiado lejos de la ruta! Muévela.</p>' : ''}
+    ${t.k === 'thread' && t._rd < 0 ? '<p style="color:var(--pink)">¡Demasiado lejos del camino! Muévelo.</p>' : ''}
     ${st.ab ? `<button class="btn small abil ${abCd ? '' : 'ready'}" data-a="abil" ${abCd ? 'disabled' : ''}>⚡ ${ABIL[st.ab].n} [Q] ${abCd ? `· ${abCd}s` : '· LISTA'}</button><small class="abd">${ABIL[st.ab].d}</small>` : ''}
     ${rows.map((r) => `
       <div class="path" style="--pc:${r.P.color}">
         <div class="ptop"><b>${r.i + 1}. ${r.P.name}</b><span class="pips">${[0, 1, 2, 3, 4].map((j) => `<i class="${j < t.p[r.i] ? 'on' : ''}"></i>`).join('')}</span></div>
         ${r.u && !r.lock
-          ? `<button class="btn small up" data-a="up" data-p="${r.i}" ${r.can ? '' : 'disabled'}>[${PATH_KEYS[r.i]}] T${t.p[r.i] + 1} ${esc(r.u.n)} · ${r.cost}</button><small>${esc(r.u.d)}</small>`
+          ? `<button class="btn small up" data-a="up" data-p="${r.i}" ${r.can ? '' : 'disabled'}>[${PATH_KEYS[r.i]}] Nv.${t.p[r.i] + 1} ${esc(r.u.n)} · ${r.cost}</button><small>${esc(r.u.d)}</small>`
           : `<small class="lock">${r.lock}</small>`}
       </div>`).join('')}
     <div class="btns">
@@ -618,14 +619,14 @@ function updateHud() {
   bar.style.background = lf > 0.5 ? 'var(--cyan)' : lf > 0.25 ? 'var(--amber)' : 'var(--pink)';
   const waiting = G.ph === 'play' && G.ic > 0 && !G.cd;
   $('btnNext').disabled = !waiting || !!G.pa;
-  setTxt('hudNext', waiting ? `+${Math.round(skipBonus(G.w, G.ic) * G._m.wave)} CPU · ${Math.ceil(G.ic)}s` : '');
+  setTxt('hudNext', waiting ? `+${Math.round(skipBonus(G.w, G.ic) * G._m.wave)} oro · ${Math.ceil(G.ic)}s` : '');
   setTxt('btnAuto', G.au ? 'Auto [A]: ON' : 'Auto [A]: OFF');
   $('btnAuto').classList.toggle('on', !!G.au);
   setTxt('btnSpeed', `Velocidad x${G.sp} [F]`);
   $('btnSpeed').classList.toggle('on', G.sp > 1);
   for (const k of TOWER_KEYS) {
     const s = shopBtns[k], c = buildCost(G, k), full = !underLimit(G, k);
-    const label = full ? 'MÁX.' : c + ' CPU';
+    const label = full ? 'MÁX.' : c + ' oro';
     if (s.last !== label) { s.last = label; s.cost.textContent = label; }
     s.b.classList.toggle('poor', full || G.money < c);
     s.b.classList.toggle('sel', placing === k && !movingId);
@@ -653,7 +654,7 @@ function updateHud() {
     $('cards').classList.toggle('hidden', !cs);
     if (cs) {
       $('cardList').innerHTML = G.cd.map((id, i) => `<button class="cardb" data-i="${i}"><span class="num">${i + 1}</span><b>${esc(CARDS[id].n)}</b><p>${esc(CARDS[id].d)}</p></button>`).join('');
-      $('cardSub').textContent = G.w === 0 ? 'Antes de empezar: elegid 1 de 3 (clic o teclas 1-3)' : `Jefe superado. Elegid 1 de 3 (clic o teclas 1-3) · parches activos: ${G.md.length}`;
+      $('cardSub').textContent = G.w === 0 ? 'Antes de empezar: elegid 1 de 3 (clic o teclas 1-3)' : `¡Tonel gigante destruido! Elegid 1 de 3 (clic o teclas 1-3) · reliquias activas: ${G.md.length}`;
     }
   }
 
@@ -664,9 +665,9 @@ function updateHud() {
     ov.dataset.state = state + G.pb;
     ov.className = 'overlay ' + (state || 'hidden');
     $('ovBtn2').classList.toggle('hidden', state === 'pause' || !isHost);
-    if (state === 'pause') { $('ovTitle').textContent = '⏸ PAUSA'; $('ovSub').textContent = `Pausado por ${G.pb || '?'} — cualquiera puede reanudar`; $('ovBtn').textContent = 'Reanudar'; }
-    if (state === 'won') { $('ovTitle').textContent = 'RELEASE COMPLETADA'; $('ovSub').textContent = `${M.name} ha sobrevivido a las ${M.waves} oleadas con ${G.life} de vida. Buen trabajo, equipo.`; $('ovBtn').textContent = 'Jugar otra vez'; }
-    if (state === 'lost') { $('ovTitle').textContent = 'SERVIDOR CAÍDO'; $('ovSub').textContent = `${M.name} cayó en la oleada ${G.w} de ${M.waves}. Toca hacer rollback.`; $('ovBtn').textContent = 'Reintentar'; }
+    if (state === 'pause') { $('ovTitle').textContent = 'PAUSA'; $('ovSub').textContent = `Pausado por ${G.pb || '?'} — cualquiera puede reanudar`; $('ovBtn').textContent = 'Reanudar'; }
+    if (state === 'won') { $('ovTitle').textContent = '¡VICTORIA!'; $('ovSub').textContent = `La manada ha defendido ${M.name} durante ${M.waves} oleadas y le quedan ${G.life} vidas. ¡Buen trabajo!`; $('ovBtn').textContent = 'Jugar otra vez'; }
+    if (state === 'lost') { $('ovTitle').textContent = 'LA GUARIDA HA CAÍDO'; $('ovSub').textContent = `Los barriles arrasaron ${M.name} en la oleada ${G.w} de ${M.waves}.`; $('ovBtn').textContent = 'Reintentar'; }
   }
 }
 
