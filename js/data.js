@@ -7,6 +7,7 @@
 
 export const W = 1280, H = 640, CELL = 40, COLS = 32, ROWS = 16;
 export const PLAYER_COLORS = ['#00f0ff', '#ff3fa4', '#b6ff3f', '#ffb03f'];
+export const PLAYER_COLOR_NAMES = ['cian', 'rosa', 'verde', 'naranja'];
 export const SPEEDS = [1, 2, 4, 6];
 export const MAX_TIER = 5;
 
@@ -376,7 +377,7 @@ export const TOWERS = {
   },
   backup: {
     name: 'León Mercader', color: '#f2c230', cost: 150, extra: 60, max: 4,
-    desc: 'Su puesto genera oro cada 5 s. Cada Mercader extra cuesta 60 más. Máximo 4.',
+    desc: 'Su puesto genera oro para su dueño cada 5 s. Cada Mercader extra cuesta 60 más. Máximo 4 entre todos.',
     base: { range: 0, income: 8, period: 5, waveBonus: 0, interest: 0, intCap: 0, heal: 0, bounty: 0, type: 'k', pierce: 0, detect: 0, heavy: 1 },
     paths: [
       { name: 'Comercio', color: '#f5e9c8', ups: [
@@ -471,14 +472,14 @@ export const CARDS = [
   { n: 'Barriles de pólvora', d: 'Los barriles explotan al romperse y dañan a los de alrededor.', e: (m) => { m.boom += 0.12; } },
   { n: 'Día de mercado', d: 'Todas las mejoras cuestan un 10% menos.', e: (m) => { m.upDisc = 1 - (1 - m.upDisc) * 0.9; } },
   { n: 'Rugido incansable', d: 'Las habilidades se recargan un 30% más rápido.', e: (m) => { m.abCd *= 0.7; } },
-  { n: 'Cofre del tesoro', d: '+400 de oro ahora mismo.', e: () => {}, now: (S) => { S.money += 400; } },
+  { n: 'Cofre del tesoro', d: '+400 de oro ahora mismo, a repartir entre todos.', e: () => {}, now: (S, share) => share(400) },
   { n: 'Sequía', d: 'Las quemaduras hacen +60% de daño y las explosiones de aceite +50%.', e: (m) => { m.burn *= 1.6; m.combo *= 1.5; } },
   { n: 'Temporada de lluvias', d: 'Mojado dura el doble y la Descarga hace +40% de daño.', e: (m) => { m.wet *= 2; m.shock *= 1.4; } },
   { n: 'Ojos en la noche', d: 'Todas las torres ven barriles camuflados.', e: (m) => { m.detect = 1; } },
   { n: 'Colmillos de acero', d: 'Todas las torres ignoran 5 de blindaje.', e: (m) => { m.pierce += 5; } },
   { n: 'Leonas de élite', d: 'Las leonas tienen +50% de vida y de daño.', e: (m) => { m.thread *= 1.5; } },
   { n: 'Tributo', d: '+30% de oro al acabar oleadas y al saltarlas.', e: (m) => { m.wave *= 1.3; } },
-  { n: 'Pacto con las hienas', d: '+700 de oro ahora, pero los barriles futuros tienen +8% de vida.', e: (m) => { m.ehp *= 1.08; }, now: (S) => { S.money += 700; } },
+  { n: 'Pacto con las hienas', d: '+700 de oro ahora (a repartir), pero los barriles futuros tienen +8% de vida.', e: (m) => { m.ehp *= 1.08; }, now: (S, share) => share(700) },
   ...TOWER_KEYS.map((k) => ({
     n: 'Maestría: ' + TOWERS[k].name,
     d: k === 'backup' ? 'Los Mercaderes generan +25% de oro.' : k === 'linter' ? 'Los tambores dan un 25% más de bonificación.' : k === 'thread' ? 'Las leonas y lanzas del Cuartel hacen +25% de daño.' : `Los ${TOWERS[k].name} hacen +25% de daño.`,

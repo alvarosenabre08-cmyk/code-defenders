@@ -4,14 +4,17 @@
 //  Modelo de red: el navegador del ANFITRIÓN ejecuta la simulación y publica
 //  instantáneas; los demás envían acciones y dibujan lo que reciben.
 //  Si el anfitrión se va, el jugador más antiguo de la sala hereda el puesto.
+//
+//  Cada jugador entra con su cuenta y ocupa un puesto (0-3) con su color, su oro y sus torres.
 // ============================================================
-import { W, H, CELL, COLS, MAPS, PLAYER_COLORS, TOWERS, TOWER_KEYS, ENEMIES, CARDS, ABIL, skin, skipBonus, waveSummary } from './data.js';
+import { W, H, CELL, COLS, MAPS, PLAYER_COLORS, PLAYER_COLOR_NAMES, TOWERS, TOWER_KEYS, ENEMIES, CARDS, ABIL, skin, skipBonus, waveSummary } from './data.js';
 import {
-  newGame, step, settle, applyAction, pack, unpack, STEP, TARGET_MODES,
-  cellFree, underLimit, towerAt, buildCost, upgradeCost, lockReason, sellValue, tStats, tRange,
+  newGame, step, settle, applyAction, setRoster, pack, unpack, STEP, TARGET_MODES,
+  cellFree, underLimit, limitFor, towerAt, buildCost, upgradeCost, lockReason, sellValue, tStats, tRange,
 } from './sim.js';
 import { render, addFx, clearFx, drawTower, drawMapThumb } from './render.js';
 import { isConfigured } from './net.js';
+import * as account from './account.js';
 
 const $ = (id) => document.getElementById(id);
 const now = () => performance.now() / 1000;
@@ -19,6 +22,7 @@ const MOCK = new URLSearchParams(location.search).has('mock');
 const PUBLISH_MS = 150;
 
 // ---------- estado ----------
+let me = null;           // cuenta con la que se ha entrado: { uid, name, profile }
 let net = null, solo = false, myName = '';
 let meta = null, players = {}, selMap = 0;
 let S = null;            // estado autoritativo (solo anfitrión)
@@ -30,27 +34,92 @@ let mouse = { x: -100, y: -100 }, mouseDirty = false, cursors = {};
 const curView = {};
 let msg = '', msgWarn = false, msgUntil = 0, panelSig = '';
 
+const slotNames = {};    // último nombre visto en cada puesto
+/** Mi puesto (0-3): decide mi color, mi oro y qué torres son mías. */
+const mySlot = () => (solo || !net ? 0 : players[net.pid]?.slot ?? 0);
+const myGold = () => (G ? G.money[mySlot()] || 0 : 0);
+const slotName = (s) => slotNames[s] || 'otro jugador';
+/** Puestos de los jugadores conectados ahora mismo. */
+const presentSlots = () => (solo ? [0] : [...new Set(Object.values(players).map((p) => p.slot))].filter((x) => x >= 0 && x < 4));
+const fmt = (n) => Math.round(n).toLocaleString('es-ES');
+
 const cv = $('cv'), ctx = cv.getContext('2d');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---------- pantallas ----------
+const SCREENS = ['login', 'home', 'lobby', 'game'];
 function show(name) {
-  for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== name);
-  $('chat').classList.toggle('hidden', solo || !net || name === 'menu');
+  for (const x of SCREENS) $(x).classList.toggle('hidden', x !== name);
+  const inRoom = name === 'lobby' || name === 'game';
+  $('chat').classList.toggle('hidden', solo || !net || !inRoom);
   $('chat').classList.toggle('lobby', name === 'lobby');
   $('btnChat').classList.toggle('hidden', solo || !net);
 }
-const current = () => ['menu', 'lobby', 'game'].find((s) => !$(s).classList.contains('hidden'));
+const current = () => SCREENS.find((x) => !$(x).classList.contains('hidden'));
 
-// ---------- menú ----------
-$('inName').value = localStorage.getItem('cd_name') || '';
+// ---------- entrar con la cuenta ----------
+async function doAuth(mode) {
+  $('loginMsg').textContent = 'Conectando…';
+  $('btnLogin').disabled = $('btnRegister').disabled = true;
+  try {
+    afterLogin(await account[mode]($('inName').value, $('inPin').value, $('chkRemember').checked));
+    $('loginMsg').textContent = ''; $('inPin').value = '';
+  } catch (err) {
+    $('loginMsg').textContent = err.message || String(err);
+  }
+  $('btnLogin').disabled = $('btnRegister').disabled = false;
+}
+function afterLogin(acc) {
+  me = acc; myName = acc.name;
+  renderHome(); show('home');
+}
+$('btnLogin').onclick = () => doAuth('login');
+$('btnRegister').onclick = () => doAuth('register');
+$('inPin').addEventListener('keydown', (e) => { if (e.key === 'Enter') doAuth('login'); });
+$('inName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('inPin').focus(); });
+$('btnLogout').onclick = () => { account.logout(); location.reload(); };
+if (account.isLocal()) $('loginMsg').textContent = MOCK ? 'Modo de pruebas: las cuentas se guardan en este navegador.' : 'Sin Firebase configurado: las cuentas se guardan solo en este navegador.';
+account.resume().then((acc) => { if (acc) afterLogin(acc); }).catch(() => {});
+
+// ---------- menú principal ----------
+$('homeNav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]');
+  if (!b) return;
+  for (const n of $('homeNav').children) n.classList.toggle('sel', n === b);
+  for (const t of document.querySelectorAll('#home .tab')) t.classList.toggle('hidden', t.id !== 'tab-' + b.dataset.tab);
+});
+function renderHome() {
+  if (!me) return;
+  const st = me.profile.st, since = new Date(me.profile.created || Date.now()).toLocaleDateString('es-ES');
+  $('homeName').textContent = me.name;
+  $('homeSub').textContent = `${st.games} partidas · ${st.wins} victorias`;
+  const best = MAPS.map((M, i) => `<div class="sbox"><b>${st.best?.[i] || 0}<small> / ${M.waves}</small></b><small>Mejor oleada en ${M.name}${st.mapWins?.[i] ? ` · ${st.mapWins[i]} ${st.mapWins[i] === 1 ? 'victoria' : 'victorias'}` : ''}</small></div>`).join('');
+  $('statGrid').innerHTML = `
+    <div class="sbox"><b>${fmt(st.games)}</b><small>Partidas jugadas</small></div>
+    <div class="sbox"><b>${fmt(st.wins)}</b><small>Victorias</small></div>
+    <div class="sbox"><b>${fmt(st.kills)}</b><small>Barriles rotos (por tu manada)</small></div>
+    <div class="sbox"><b>${fmt(st.dmg)}</b><small>Daño hecho por tus torres</small></div>
+    <div class="sbox"><b>${fmt(st.gold)}</b><small>Oro ganado</small></div>${best}`;
+  $('profileBox').innerHTML = `Nombre: <b>${esc(me.name)}</b><br>Cuenta creada el <b>${since}</b><br>Partidas: <b>${st.games}</b> · Victorias: <b>${st.wins}</b>`
+    + (account.isLocal() ? '<br><span style="color:var(--amber)">Esta cuenta está guardada solo en este navegador.</span>' : '');
+}
+// Torres: las 8 con las que se empieza
+for (const k of TOWER_KEYS) {
+  const d = TOWERS[k], el = document.createElement('div');
+  el.className = 'tcard';
+  const ic = document.createElement('canvas'); ic.width = ic.height = 136;
+  const g = ic.getContext('2d'); g.scale(2, 2);
+  drawTower(g, k, 34, 33, null, 0.35, 0, false);
+  const txt = document.createElement('div');
+  txt.innerHTML = `<b style="color:${d.color}">${d.name}</b><span class="cost">${d.cost} de oro</span><small>${d.desc}</small>`;
+  el.append(ic, txt);
+  $('towerGrid').append(el);
+}
+
+// ---------- jugar: crear sala, unirse o práctica ----------
 if (!isConfigured() && !MOCK) {
   $('btnCreate').disabled = $('btnJoin').disabled = true;
   $('menuMsg').textContent = 'Multijugador desactivado: falta pegar la configuración de Firebase en js/firebase-config.js';
-}
-function readName() {
-  myName = ($('inName').value.trim() || 'leon_' + Math.floor(Math.random() * 90 + 10)).slice(0, 12);
-  localStorage.setItem('cd_name', myName);
 }
 async function getNet() {
   if (net) return net;
@@ -59,7 +128,7 @@ async function getNet() {
   return net;
 }
 async function enterRoom(fn) {
-  readName();
+  if (!me) return;
   $('menuMsg').textContent = 'Conectando…';
   try {
     await getNet();
@@ -73,20 +142,21 @@ async function enterRoom(fn) {
     $('menuMsg').textContent = err.message?.includes('sala') ? err.message : 'Error de conexión: ' + (err.message || err);
   }
 }
-$('btnCreate').onclick = () => enterRoom(() => net.create(myName));
+$('btnCreate').onclick = () => enterRoom(() => net.create(myName, me.uid));
 $('btnJoin').onclick = () => {
   const code = $('inCode').value.trim().toUpperCase();
   if (!/^[A-Z]{4}$/.test(code)) { $('menuMsg').textContent = 'El código son 4 letras.'; return; }
-  enterRoom(() => net.join(code, myName));
+  enterRoom(() => net.join(code, myName, me.uid));
 };
 $('inCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnJoin').click(); });
 $('btnSolo').onclick = () => {
-  readName();
+  if (!me) return;
   solo = true; isHost = true;
-  players = { me: { name: myName, slot: 0 } };
+  players = { me: { name: myName, slot: 0 } }; slotNames[0] = myName;
   $('lobbyCode').textContent = $('hudCode').textContent = 'SOLO';
-  updateLobby(); updateChips(); show('lobby');
+  updateLobby(); show('lobby');
 };
+// Salir al menú: se recarga la página (la sesión se recupera sola y vuelves al menú principal)
 $('btnLeave').onclick = () => { net?.leave(); location.reload(); };
 addEventListener('pagehide', () => net?.leave());
 
@@ -99,7 +169,11 @@ function subscribe() {
     if (m?.started && current() !== 'game') show('game');
     if (m && !m.started && current() === 'game') toLobby();
   });
-  net.on('players', (p) => { players = p || {}; playersChanged(); evalHost(); updateLobby(); updateChips(); });
+  net.on('players', (p) => {
+    players = p || {};
+    for (const q of Object.values(players)) slotNames[q.slot] = q.name;
+    playersChanged(); evalHost(); updateLobby();
+  });
   net.on('s', (str) => {
     lastSnapStr = str || null;
     if (isHost) return;
@@ -147,7 +221,7 @@ function updateLobby() {
   for (let i = 0; i < (solo ? 1 : 4); i++) {
     const p = list[i];
     html += p
-      ? `<li style="border-color:${PLAYER_COLORS[p[1].slot % 4]};color:${PLAYER_COLORS[p[1].slot % 4]}">${esc(p[1].name)}${p[0] === meta?.host ? ' ★' : ''}${p[0] === myId ? ' (tú)' : ''}</li>`
+      ? `<li style="border-color:${PLAYER_COLORS[p[1].slot % 4]};color:${PLAYER_COLORS[p[1].slot % 4]}">${esc(p[1].name)}${p[0] === meta?.host ? ' ★' : ''}${p[0] === myId ? ' (tú)' : ''}<small> · ${PLAYER_COLOR_NAMES[p[1].slot % 4]}</small></li>`
       : '<li class="empty">esperando…</li>';
   }
   $('lobbyPlayers').innerHTML = html;
@@ -156,14 +230,22 @@ function updateLobby() {
   $('lobbyMsg').textContent = solo ? 'Práctica en solitario: elige mapa y empieza.'
     : isHost ? `${list.length}/4 jugadores. Elige el mapa y empieza cuando quieras.` : 'Esperando a que el anfitrión (★) elija mapa y empiece…';
 }
+/** Oro de los compañeros en la barra de arriba (el mío va aparte, en grande). */
+let chipSig = '';
 function updateChips() {
-  $('hudPlayers').innerHTML = sortedPlayers()
-    .map(([, p]) => `<span class="chip" style="border-color:${PLAYER_COLORS[p.slot % 4]};color:${PLAYER_COLORS[p.slot % 4]}">${esc(p.name)}</span>`).join('');
+  const mine = mySlot(), here = presentSlots();
+  const rows = G.act.filter((x) => x !== mine).map((x) => [x, Math.floor(G.money[x] || 0), here.includes(x)]);
+  const sig = mine + '|' + rows.join(';') + '|' + rows.map((r) => slotName(r[0])).join();
+  if (sig === chipSig) return;
+  chipSig = sig;
+  $('hudMine').style.setProperty('--mine', PLAYER_COLORS[mine]);
+  $('hudPlayers').innerHTML = rows.map(([x, gold, on]) =>
+    `<span class="chip${on ? '' : ' away'}" style="border-color:${PLAYER_COLORS[x]};color:${PLAYER_COLORS[x]}" title="${on ? 'Oro de ' + esc(slotName(x)) : esc(slotName(x)) + ' se ha desconectado'}"><span class="nm">${esc(slotName(x))}</span><i class="coin"></i>${gold}</span>`).join('');
 }
 $('btnStart').onclick = () => {
   if (!isHost) return;
   clearFx();
-  S = G = newGame(selMap); dirty = true;
+  S = G = newGame(selMap, presentSlots()); dirty = true;
   if (solo) { startSim(); show('game'); } else net.setMeta({ started: true, map: selMap });
 };
 
@@ -199,8 +281,7 @@ chatIn.addEventListener('keydown', (e) => {
   if (performance.now() - lastChat < 600) return; // anti-spam: conserva el texto
   chatIn.value = '';
   lastChat = performance.now();
-  const me = players[net.pid];
-  net.chat(myName, me ? me.slot : 0, m.slice(0, 120));
+  net.chat(myName, mySlot(), m.slice(0, 120));
   closeChat();
 });
 /** Avisos de "X se ha unido / ha salido" en el chat. */
@@ -230,7 +311,7 @@ function evalHost() {
 function becomeHost() {
   isHost = true;
   if (meta.started) {
-    if (!S) S = lastSnapStr ? unpack(lastSnapStr).S : newGame(selMap);
+    if (!S) S = lastSnapStr ? unpack(lastSnapStr).S : newGame(selMap, presentSlots());
     G = S; prevMap = null; dirty = true;
   }
   stopActions = net.onAction((a) => { if (S && applyAction(S, a)) { settle(S); dirty = true; } });
@@ -242,6 +323,27 @@ function stopHost() {
   stopActions = null;
   clearInterval(simTimer); simTimer = null;
 }
+/**
+ * El anfitrión mantiene la lista de jugadores de la partida. Si alguien se desconecta se le
+ * guarda el sitio 15 s (por si solo ha recargado o se le ha caído el wifi); pasado ese tiempo,
+ * sus torres pasan al jugador con menos torres y su oro se reparte.
+ */
+const GRACE_MS = 15000, goneAt = {};
+let lastMode = '';
+function syncRoster() {
+  const here = presentSlots();
+  if (!here.length) return;
+  const t = performance.now(), want = here.slice(), before = S.act.slice();
+  for (const x of S.act) {
+    if (here.includes(x)) { delete goneAt[x]; continue; }
+    goneAt[x] ??= t;
+    if (t - goneAt[x] < GRACE_MS) want.push(x); else delete goneAt[x];
+  }
+  if (!setRoster(S, want)) return;
+  dirty = true;
+  for (const x of before) if (!S.act.includes(x)) S._fx.push(['t', 640, 220, `${slotName(x)} se ha ido: sus torres y su oro pasan a la manada`, PLAYER_COLORS[x], 4]);
+  for (const x of S.act) if (!before.includes(x)) S._fx.push(['t', 640, 220, `${slotName(x)} se une a la partida`, PLAYER_COLORS[x], 3]);
+}
 function startSim() {
   clearInterval(simTimer);
   lastTick = performance.now(); acc = 0;
@@ -251,6 +353,7 @@ function tick() {
   const t = performance.now(), dt = (t - lastTick) / 1000;
   lastTick = t;
   if (!S) return;
+  if (!solo && net && S.ph === 'play') syncRoster();
   if (S.ph !== 'play' || S.pa || S.cd) acc = 0;
   else {
     // velocidad x1/x2/x4/x6: se dan más pasos de simulación por tick
@@ -261,6 +364,9 @@ function tick() {
   if (S._fx.length) { addFx(S._fx, now()); outFx.push(...S._fx); S._fx.length = 0; }
   if (solo || !net) { outFx.length = 0; return; }
   const every = S.ph === 'play' && !S.pa && !S.cd ? PUBLISH_MS : 2000;
+  // fin de partida, pausa o reliquias: se publica al momento para que todos lo vean a la vez
+  const mode = S.ph + (S.pa ? 'p' : '') + (S.cd ? 'c' : '') + S.gid;
+  if (mode !== lastMode) { lastMode = mode; dirty = true; }
   if (dirty || t - lastPub >= every) {
     if (outFx.length > 60) { const cut = outFx.length - 24; outFx = outFx.filter((f, i) => f[0] !== 'b' || i >= cut).slice(-70); }
     net.publish(pack(S, outFx));
@@ -270,7 +376,7 @@ function tick() {
 
 /** Envía una acción: el anfitrión la aplica directamente, el resto la manda por la red. */
 function act(a) {
-  a.n = myName;
+  a.n = myName; a.s = mySlot();
   if (isHost && S) { if (applyAction(S, a)) { settle(S); dirty = true; } }
   else if (net) net.act(a);
 }
@@ -296,7 +402,9 @@ function hoverText() {
   if (!hover || placing) return '';
   const M = MAPS[G.map], key = hover.cy * COLS + hover.cx;
   const t = towerAt(G, hover.cx, hover.cy);
-  if (t) return `${TOWERS[t.k].name} ${t.p.join('-')}: U/I/O mejorar rama · T objetivo · Q habilidad · M mover · X vender`;
+  if (t) return t.o === mySlot()
+    ? `${TOWERS[t.k].name} ${t.p.join('-')}: U/I/O mejorar rama · T objetivo · Q habilidad · M mover · X vender`
+    : `${TOWERS[t.k].name} ${t.p.join('-')} de ${slotName(t.o)}: solo su dueño puede mejorarla, venderla o moverla.`;
   const oi = M.obsAt.get(key);
   if (oi !== undefined && !G.ob[oi]) return `Obstáculo: estorba. Haz clic y quítalo por ${M.obs[oi][2]} de oro (o pulsa X).` + (M.padAt.has(key) ? ' Debajo hay un tótem de poder (+30% de daño).' : '');
   if (M.padAt.has(key)) return 'Tótem de poder: la torre que construyas aquí hace +30% de daño.';
@@ -367,9 +475,9 @@ cv.addEventListener('pointerdown', (e) => {
       act({ t: 'move', id: movingId, cx, cy });
       selId = movingId; placing = null; movingId = null;
     } else {
-      if (!underLimit(G, placing)) return info(`Máximo ${TOWERS[placing].max} ${TOWERS[placing].name} por partida.`, true);
+      if (!underLimit(G, placing, mySlot())) return info(`Máximo ${limitFor(G, placing)} ${TOWERS[placing].name} por jugador en esta partida.`, true);
       if (!cellFree(G, cx, cy)) return info('Ahí no se puede construir (camino, guarida, estructura u ocupado).', true);
-      if (G.money < buildCost(G, placing)) return info('Oro insuficiente.', true);
+      if (myGold() < buildCost(G, placing)) return info('No tienes oro suficiente.', true);
       act({ t: 'build', k: placing, cx, cy });
       if (!e.shiftKey) placing = null; // Mayús + clic para seguir construyendo
     }
@@ -407,41 +515,52 @@ function targetOb() {
   return oi !== undefined && !G.ob[oi] ? oi : -1;
 }
 const NO_TOWER = 'Selecciona una torre o pon el ratón encima.';
+/** true si la torre es mía; si no, avisa de quién es. */
+function mine(t) {
+  if (t.o === mySlot()) return true;
+  info(`Esa torre es de ${slotName(t.o)}: solo su dueño puede mejorarla, venderla o moverla.`, true);
+  return false;
+}
 const PATH_KEYS = ['U', 'I', 'O'];
 function upgrade(t, i) {
   if (!t) return info(NO_TOWER, true);
+  if (!mine(t)) return;
   const P = TOWERS[t.k].paths[i], lock = lockReason(G, t, i);
   if (lock) return info(`${P.name}: ${lock}.`, true);
   const cost = upgradeCost(G, t, i), u = P.ups[t.p[i]];
-  if (G.money < cost) return info(`Oro insuficiente: "${u.n}" cuesta ${cost}.`, true);
+  if (myGold() < cost) return info(`No tienes oro suficiente: "${u.n}" cuesta ${cost}.`, true);
   act({ t: 'up', id: t.i, p: i });
   info(`${TOWERS[t.k].name} → ${u.n} (nivel ${t.p[i] + 1}): ${u.d}`);
 }
 function sell(t) {
   if (!t) return info(NO_TOWER, true);
+  if (!mine(t)) return;
   act({ t: 'sell', id: t.i });
   info(`${TOWERS[t.k].name}: vendido por ${sellValue(t)} de oro.`);
   if (selId === t.i) selId = null;
 }
 function clearOb(i) {
   const o = MAPS[G.map].obs[i];
-  if (G.money < o[2]) return info(`Oro insuficiente: quitar el obstáculo cuesta ${o[2]}.`, true);
+  if (myGold() < o[2]) return info(`No tienes oro suficiente: quitar el obstáculo cuesta ${o[2]}.`, true);
   act({ t: 'clear', i });
   info('Obstáculo eliminado: ya se puede construir ahí.');
   selOb = -1;
 }
 function startMove(t) {
   if (!t) return info(NO_TOWER, true);
+  if (!mine(t)) return;
   selId = t.i; placing = t.k; movingId = t.i;
   info('Haz clic en la nueva posición (la torre tarda 3 s en reiniciarse). Esc cancela.');
 }
 function cycleTarget(t) {
   if (!t) return info(NO_TOWER, true);
+  if (!mine(t)) return;
   act({ t: 'tgt', id: t.i });
   info(`${TOWERS[t.k].name}: objetivo → ${TARGET_MODES[(t.tg + 1) % TARGET_MODES.length]}.`);
 }
 function ability(t) {
   if (!t) return info(NO_TOWER, true);
+  if (!mine(t)) return;
   const s = tStats(t);
   if (!s.ab) return info('Esta torre no tiene habilidad activa (se desbloquea en el nivel 4 de la rama 2).', true);
   if (t.ac > 0) return info(`${ABIL[s.ab].n}: recargando, ${Math.ceil(t.ac)} s.`, true);
@@ -449,8 +568,8 @@ function ability(t) {
   info(`¡${ABIL[s.ab].n}! — ${ABIL[s.ab].d}.`);
 }
 function cycleTower() {
-  if (!G || !G.T.length) return;
-  const list = [...G.T].sort((a, b) => a.x - b.x || a.y - b.y);
+  const list = G ? G.T.filter((t) => t.o === mySlot()).sort((a, b) => a.x - b.x || a.y - b.y) : [];
+  if (!list.length) return;
   const i = list.findIndex((t) => t.i === selId);
   selId = list[(i + 1) % list.length].i;
   placing = null; movingId = null; selOb = -1;
@@ -458,7 +577,7 @@ function cycleTower() {
 const toggleKeys = () => $('keys').classList.toggle('hidden');
 
 addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && net && !solo && current() !== 'menu') { e.preventDefault(); openChat(); return; }
+  if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && net && !solo && (current() === 'lobby' || current() === 'game')) { e.preventDefault(); openChat(); return; }
   if (current() !== 'game' || e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const playing = G && G.ph === 'play';
@@ -544,7 +663,7 @@ function updatePanel() {
   if (!t) {
     if (selId && !placing) selId = null;
     if (G && selOb >= 0 && !G.ob[selOb]) {
-      const M = MAPS[G.map], o = M.obs[selOb], can = G.money >= o[2], pad = M.padAt.has(o[1] * COLS + o[0]);
+      const M = MAPS[G.map], o = M.obs[selOb], can = myGold() >= o[2], pad = M.padAt.has(o[1] * COLS + o[0]);
       const sig = ['ob', selOb, can].join();
       if (sig === panelSig) return;
       panelSig = sig;
@@ -559,21 +678,31 @@ function updatePanel() {
     if (panelSig) { p.classList.add('hidden'); panelSig = ''; }
     return;
   }
-  const d = TOWERS[t.k], st = tStats(t);
+  const d = TOWERS[t.k], st = tStats(t), own = t.o === mySlot(), gold = myGold();
   const rows = d.paths.map((P, i) => {
     const lock = lockReason(G, t, i), u = P.ups[t.p[i]], cost = u ? upgradeCost(G, t, i) : 0;
-    return { P, i, lock, u, cost, can: !lock && G.money >= cost };
+    return { P, i, lock, u, cost, can: !lock && gold >= cost };
   });
   const abCd = Math.ceil(Math.max(0, t.ac));
-  const sig = [t.i, t.p.join(''), t.tg, t._disc, t._b, t._pad, G.md.length, rows.map((r) => r.can + r.lock).join(''), t.x > 16, t._rd < 0, abCd, t.at > 0].join();
+  const sig = [t.i, t.o, own, slotName(t.o), t.p.join(''), t.tg, t._disc, t._b, t._pad, G.md.length, rows.map((r) => r.can + r.lock).join(''), t.x > 16, t._rd < 0, abCd, t.at > 0].join();
   if (sig === panelSig) return;
   panelSig = sig;
   p.classList.remove('hidden');
   p.classList.toggle('left', t.x > 16);
   const sk = skin(t.k, t.p);
   const title = sk.tier ? d.paths[sk.dom].ups[sk.tier - 1].n : d.name;
+  const tag = `<span class="owner" style="background:${PLAYER_COLORS[t.o] || '#ccc'}">${own ? 'Tuya' : 'De ' + esc(slotName(t.o))}</span>`;
+  if (!own) {
+    // torre de un compañero: solo se puede mirar
+    p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
+      <p class="sub">${d.name} ${tag}</p>
+      <p style="color:var(--text)">${statLines(t, st)}</p>
+      ${rows.map((r) => `<div class="path" style="--pc:${r.P.color}"><div class="ptop"><b>${r.i + 1}. ${r.P.name}</b><span class="pips">${[0, 1, 2, 3, 4].map((j) => `<i class="${j < t.p[r.i] ? 'on' : ''}"></i>`).join('')}</span></div></div>`).join('')}
+      <p>Solo ${esc(slotName(t.o))} puede mejorarla, venderla o moverla.</p>`;
+    return;
+  }
   p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
-    <p class="sub">${d.name}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
+    <p class="sub">${d.name} ${tag}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
     <p style="color:var(--text)">${statLines(t, st)}</p>
     ${t.k === 'thread' && t._rd < 0 ? '<p style="color:var(--pink)">¡Demasiado lejos del camino! Muévelo.</p>' : ''}
     ${st.ab ? `<button class="btn small abil ${abCd ? '' : 'ready'}" data-a="abil" ${abCd ? 'disabled' : ''}>⚡ ${ABIL[st.ab].n} [Q] ${abCd ? `· ${abCd}s` : '· LISTA'}</button><small class="abd">${ABIL[st.ab].d}</small>` : ''}
@@ -611,7 +740,9 @@ function updateHud() {
   const M = MAPS[G.map];
   setTxt('hudMap', M.name);
   setTxt('hudWave', `${G.w}/${M.waves}`);
-  setTxt('hudCpu', String(Math.floor(G.money)));
+  const gold = myGold(), slot = mySlot();
+  setTxt('hudCpu', String(Math.floor(gold)));
+  updateChips();
   setTxt('hudLife', String(Math.max(0, G.life)));
   const lf = Math.max(0, Math.min(1, G.life / M.life));
   const bar = $('hudLifeBar');
@@ -619,16 +750,16 @@ function updateHud() {
   bar.style.background = lf > 0.5 ? 'var(--cyan)' : lf > 0.25 ? 'var(--amber)' : 'var(--pink)';
   const waiting = G.ph === 'play' && G.ic > 0 && !G.cd;
   $('btnNext').disabled = !waiting || !!G.pa;
-  setTxt('hudNext', waiting ? `+${Math.round(skipBonus(G.w, G.ic) * G._m.wave)} oro · ${Math.ceil(G.ic)}s` : '');
+  setTxt('hudNext', waiting ? `+${Math.round(skipBonus(G.w, G.ic) * G._m.wave)} · ${Math.ceil(G.ic)}s` : '');
   setTxt('btnAuto', G.au ? 'Auto [A]: ON' : 'Auto [A]: OFF');
   $('btnAuto').classList.toggle('on', !!G.au);
-  setTxt('btnSpeed', `Velocidad x${G.sp} [F]`);
+  setTxt('btnSpeed', `Vel. x${G.sp} [F]`);
   $('btnSpeed').classList.toggle('on', G.sp > 1);
   for (const k of TOWER_KEYS) {
-    const s = shopBtns[k], c = buildCost(G, k), full = !underLimit(G, k);
+    const s = shopBtns[k], c = buildCost(G, k), full = !underLimit(G, k, slot);
     const label = full ? 'MÁX.' : c + ' oro';
     if (s.last !== label) { s.last = label; s.cost.textContent = label; }
-    s.b.classList.toggle('poor', full || G.money < c);
+    s.b.classList.toggle('poor', full || gold < c);
     s.b.classList.toggle('sel', placing === k && !movingId);
   }
   // barra de información
@@ -637,7 +768,7 @@ function updateHud() {
   $('info').classList.toggle('warn', live && msgWarn);
 
   // barra de habilidades activas
-  const ab = G.T.filter((t) => tStats(t).ab);
+  const ab = G.T.filter((t) => t.o === slot && tStats(t).ab);
   const sig = ab.map((t) => t.i + ':' + Math.ceil(Math.max(0, t.ac)) + (t.at > 0 ? 'a' : '')).join();
   if (sig !== abilSig) {
     abilSig = sig;
@@ -665,10 +796,34 @@ function updateHud() {
     ov.dataset.state = state + G.pb;
     ov.className = 'overlay ' + (state || 'hidden');
     $('ovBtn2').classList.toggle('hidden', state === 'pause' || !isHost);
+    $('ovScore').classList.toggle('hidden', state !== 'won' && state !== 'lost');
+    if (state === 'won' || state === 'lost') { $('ovScore').innerHTML = scoreTable(); recordResult(); }
     if (state === 'pause') { $('ovTitle').textContent = 'PAUSA'; $('ovSub').textContent = `Pausado por ${G.pb || '?'} — cualquiera puede reanudar`; $('ovBtn').textContent = 'Reanudar'; }
     if (state === 'won') { $('ovTitle').textContent = '¡VICTORIA!'; $('ovSub').textContent = `La manada ha defendido ${M.name} durante ${M.waves} oleadas y le quedan ${G.life} vidas. ¡Buen trabajo!`; $('ovBtn').textContent = 'Jugar otra vez'; }
     if (state === 'lost') { $('ovTitle').textContent = 'LA GUARIDA HA CAÍDO'; $('ovSub').textContent = `Los barriles arrasaron ${M.name} en la oleada ${G.w} de ${M.waves}.`; $('ovBtn').textContent = 'Reintentar'; }
   }
+}
+
+/** Marcador de fin de partida: daño y oro ganado de cada jugador. */
+function scoreTable() {
+  const total = G.act.reduce((a, x) => a + G.st[x][0], 0) || 1;
+  return '<tr><th>Jugador</th><th>Daño</th><th>% del daño</th><th>Oro ganado</th></tr>' + [...G.act].sort((a, b) => G.st[b][0] - G.st[a][0]).map((x) =>
+    `<tr><td style="color:${PLAYER_COLORS[x]}">${esc(slotName(x))}${x === mySlot() ? ' (tú)' : ''}</td><td class="n">${fmt(G.st[x][0])}</td><td class="n">${Math.round((G.st[x][0] / total) * 100)}%</td><td class="n">${fmt(G.st[x][1])}</td></tr>`).join('');
+}
+/** Guarda el resultado en mi cuenta (una sola vez por partida). */
+let savedGid = '';
+function recordResult() {
+  const x = mySlot();
+  if (!me || !G.gid || savedGid === G.gid || !G.act.includes(x)) return;
+  savedGid = G.gid;
+  if (me.profile.lastGid === G.gid) return; // ya estaba guardada (por ejemplo, tras recargar la página)
+  const st = me.profile.st, won = G.ph === 'won';
+  const next = {
+    ...st, games: st.games + 1, wins: st.wins + (won ? 1 : 0), kills: st.kills + G.kills, dmg: st.dmg + G.st[x][0], gold: st.gold + G.st[x][1],
+    best: { ...st.best, [G.map]: Math.max(st.best?.[G.map] || 0, G.w) },
+    mapWins: { ...st.mapWins, [G.map]: (st.mapWins?.[G.map] || 0) + (won ? 1 : 0) },
+  };
+  account.save({ st: next, lastGid: G.gid }).then(renderHome).catch((err) => { console.error(err); info('No se ha podido guardar el resultado en tu cuenta.', true); });
 }
 
 // ---------- bucle de dibujo ----------
@@ -691,7 +846,7 @@ function frame() {
     prev: isHost ? null : prevMap,
     alpha: Math.min(1, (performance.now() - snapAt) / PUBLISH_MS),
     hover, placing, placingP: mv ? mv.p : null, movingId, selId, selOb,
-    valid: !!(placing && hover && cellFree(G, hover.cx, hover.cy, movingId || undefined) && (movingId || (underLimit(G, placing) && G.money >= buildCost(G, placing)))),
+    valid: !!(placing && hover && cellFree(G, hover.cx, hover.cy, movingId || undefined) && (movingId || (underLimit(G, placing, mySlot()) && myGold() >= buildCost(G, placing)))),
     cursors: list,
   });
   updateHud();
@@ -700,4 +855,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 // acceso para pruebas automáticas
-window.__cd = { get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, act };
+window.__cd = { get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, get me() { return me; }, get slot() { return mySlot(); }, act };

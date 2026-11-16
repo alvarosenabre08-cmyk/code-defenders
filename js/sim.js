@@ -1,6 +1,7 @@
 // ============================================================
 //  Leones TD — simulación (solo la ejecuta el anfitrión de la sala)
 //  Sin DOM ni red: estado puro + step() + applyAction() + pack()/unpack().
+//  Cada jugador ocupa un puesto (0-3) con su propio oro; cada torre tiene dueño (t.o).
 // ============================================================
 import {
   CELL, COLS, ROWS, MAPS, SPEEDS, MAX_TIER, TOWERS, TOWER_KEYS, ENEMIES, ENEMY_KEYS, CARDS, ABIL,
@@ -9,19 +10,56 @@ import {
 
 export const STEP = 1 / 30;
 export const TARGET_MODES = ['Primero', 'Último', 'Más fuerte', 'Más cercano'];
+let gidN = 0; // contador para el identificador de partida (sin usar Math.random: no altera el azar del juego)
 const BOMB_CD = 50, GATE_CD = 45, GATE_T = 4, SWITCH_CD = 8, BOMB_R = 95;
 
-export function newGame(map = 0) {
+/**
+ * Partida nueva. act = puestos (0-3) de los jugadores presentes.
+ * Cada jugador tiene su propio oro: money[puesto]. El oro inicial del mapa se reparte entre todos.
+ */
+export function newGame(map = 0, act = [0]) {
   const M = MAPS[map] ? MAPS[map] : MAPS[0];
+  act = [...new Set(act)].filter((s) => s >= 0 && s < 4).sort();
+  if (!act.length) act = [0];
   const S = {
     ph: 'play', pa: 0, pb: '', au: 0, sp: 1, map: MAPS[map] ? map : 0, w: 0, wt: 0, si: 0, ic: 20,
-    money: M.money, life: M.life, nid: 1, kills: 0, T: [], E: [],
+    money: [0, 0, 0, 0], act, gr: 0, st: [[0, 0], [0, 0], [0, 0], [0, 0]], gid: Date.now().toString(36) + (gidN++ % 1296).toString(36),
+    life: M.life, nid: 1, kills: 0, T: [], E: [],
     ob: M.obs.map(() => 0), sw: M.forks.map(() => 0), swc: 0, tr: M.traps.map(() => ({ c: 0, a: 0 })),
-    md: [], cd: null, _fx: [], _spawn: [], _boom: [], _bounty: 0,
+    md: [], cd: null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0],
   };
+  for (const s of act) { S.money[s] = Math.floor(M.money / act.length); S.gr |= 1 << s; }
   S._m = calcMods(S.md);
   offerCards(S);
   return S;
+}
+
+// ---------- oro por jugador ----------
+/** Da oro a un jugador (cuenta para su estadística de oro ganado). */
+function give(S, s, amt) { S.money[s] += amt; S.st[s][1] += amt; }
+/** Reparte oro a partes iguales entre los jugadores presentes. */
+function shareGold(S, amt) { for (const s of S.act) give(S, s, amt / S.act.length); }
+
+/**
+ * El anfitrión avisa de qué puestos están presentes.
+ *  · Jugador nuevo: entra con una ayuda de oro (solo la primera vez que se usa ese puesto).
+ *  · Jugador que se va: sus torres pasan al jugador con menos torres y su oro se reparte.
+ */
+export function setRoster(S, slots) {
+  slots = [...new Set(slots)].filter((s) => s >= 0 && s < 4).sort();
+  if (!slots.length) return false;
+  const added = slots.filter((s) => !S.act.includes(s)), gone = S.act.filter((s) => !slots.includes(s));
+  if (!added.length && !gone.length) return false;
+  S.act = slots;
+  for (const s of added) if (!(S.gr & (1 << s))) { S.gr |= 1 << s; S.money[s] += Math.round(100 + 20 * S.w); }
+  for (const s of gone) {
+    const cnt = (q) => S.T.filter((t) => t.o === q).length;
+    const heir = slots.reduce((b, q) => (b < 0 || cnt(q) < cnt(b) ? q : b), -1);
+    for (const t of S.T) if (t.o === s) t.o = heir;
+    const g = S.money[s]; S.money[s] = 0;
+    for (const q of slots) S.money[q] += g / slots.length;
+  }
+  return true;
 }
 
 // ---------- utilidades de torres ----------
@@ -44,8 +82,10 @@ export function buildCost(S, k) {
   const d = TOWERS[k];
   return d.cost + (d.extra ? d.extra * S.T.filter((t) => t.k === k).length : 0);
 }
-/** false si ya se ha alcanzado el máximo de torres de ese tipo (Backups). */
-export const underLimit = (S, k) => !TOWERS[k].max || S.T.filter((t) => t.k === k).length < TOWERS[k].max;
+/** Máximo de torres de un tipo por jugador (0 = sin límite). El límite del mapa se reparte entre los presentes. */
+export const limitFor = (S, k) => (TOWERS[k].max ? Math.max(1, Math.floor(TOWERS[k].max / S.act.length)) : 0);
+/** false si el jugador del puesto sl ya tiene el máximo de torres de ese tipo (Mercaderes). */
+export const underLimit = (S, k, sl) => !TOWERS[k].max || S.T.filter((t) => t.k === k && t.o === sl).length < limitFor(S, k);
 export function cellFree(S, cx, cy, ignoreId) {
   if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
   const M = MAPS[S.map], key = cy * COLS + cx;
@@ -88,8 +128,8 @@ function syncSoldiers(S, t) {
   for (const u of t.s) if (u.h > 0) u.h = Math.max(u.h, hp * 0.5);
 }
 
-function mkTower(S, k, cx, cy, cost) {
-  const t = { i: S.nid++, k, x: cx, y: cy, p: [0, 0, 0], tg: k === 'debugger' ? 2 : 0, c: 0, dz: 0, inv: cost, cy: 2, a: 0, ac: 0, at: 0, s: [] };
+function mkTower(S, k, cx, cy, cost, o) {
+  const t = { i: S.nid++, k, o, x: cx, y: cy, p: [0, 0, 0], tg: k === 'debugger' ? 2 : 0, c: 0, dz: 0, inv: cost, cy: 2, a: 0, ac: 0, at: 0, s: [] };
   syncSoldiers(S, t); rally(S, t);
   S.T.push(t);
   return t;
@@ -97,7 +137,7 @@ function mkTower(S, k, cx, cy, cost) {
 function mkEnemy(S, k, r, d) {
   const M = MAPS[S.map];
   const m = Math.round(ENEMIES[k].hp * hpMult(Math.max(1, S.w)) * M.hp * S._m.ehp);
-  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0 };
+  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
   place(M, e);
   S.E.push(e);
   return e;
@@ -115,11 +155,14 @@ export function applyAction(S, a) {
   if (!a || typeof a !== 'object') return false;
   if (a.t === 'restart') {
     if (S.ph === 'play') return false;
-    Object.assign(S, newGame(S.map));
+    Object.assign(S, newGame(S.map, S.act));
     return true;
   }
   if (S.ph !== 'play') return false;
   const M = MAPS[S.map];
+  const sl = S.act.includes(a.s) ? a.s : -1; // puesto del jugador que envía la acción
+  /** Torre de la acción, solo si es del jugador que la envía. */
+  const own = () => { const t = S.T.find((q) => q.i === a.id); return t && t.o === sl ? t : null; };
   switch (a.t) {
     case 'pause':
       S.pa = S.pa ? 0 : 1; S.pb = String(a.n || '').slice(0, 14);
@@ -131,7 +174,7 @@ export function applyAction(S, a) {
       const id = S.cd && S.cd[a.i | 0];
       if (id === undefined || id === false || id === null) return false;
       S.md.push(id);
-      if (CARDS[id].now) CARDS[id].now(S);
+      if (CARDS[id].now) CARDS[id].now(S, (n) => shareGold(S, n));
       S._m = calcMods(S.md); S.cd = null;
       S._fx.push(['t', 640, 150, 'RELIQUIA: ' + CARDS[id].n, '#ffe14a', 2.2]);
       return true;
@@ -144,31 +187,31 @@ export function applyAction(S, a) {
       if (S.ic > 0 && !S.pa && !S.cd) { callEarly(S, 0.01); return true; }
       return false;
     case 'build': {
-      if (!TOWERS[a.k] || !underLimit(S, a.k) || !cellFree(S, a.cx, a.cy)) return false;
+      if (sl < 0 || !TOWERS[a.k] || !underLimit(S, a.k, sl) || !cellFree(S, a.cx, a.cy)) return false;
       const cost = buildCost(S, a.k);
-      if (S.money < cost) return false;
-      S.money -= cost; mkTower(S, a.k, a.cx, a.cy, cost);
+      if (S.money[sl] < cost) return false;
+      S.money[sl] -= cost; mkTower(S, a.k, a.cx, a.cy, cost, sl);
       return true;
     }
     case 'up': {
-      const t = S.T.find((q) => q.i === a.id), i = a.p | 0;
+      const t = own(), i = a.p | 0;
       if (!t || i < 0 || i > 2 || lockReason(S, t, i)) return false;
       calcBuffs(S);
       const cost = upgradeCost(S, t, i);
-      if (S.money < cost) return false;
-      S.money -= cost; t.inv += cost; t.p = t.p.slice(); t.p[i]++;
+      if (S.money[sl] < cost) return false;
+      S.money[sl] -= cost; t.inv += cost; t.p = t.p.slice(); t.p[i]++;
       syncSoldiers(S, t); rally(S, t);
       return true;
     }
     case 'sell': {
-      const t = S.T.find((q) => q.i === a.id);
+      const t = own();
       if (!t) return false;
-      S.money += sellValue(t);
+      S.money[sl] += sellValue(t);
       S.T = S.T.filter((q) => q !== t);
       return true;
     }
     case 'move': {
-      const t = S.T.find((q) => q.i === a.id);
+      const t = own();
       if (!t || !cellFree(S, a.cx, a.cy, t.i)) return false;
       t.x = a.cx; t.y = a.cy; t.dz = 3; // 3 s "reiniciando" tras moverla
       for (const s of t.s) s.e = 0;
@@ -176,19 +219,19 @@ export function applyAction(S, a) {
       return true;
     }
     case 'tgt': {
-      const t = S.T.find((q) => q.i === a.id);
+      const t = own();
       if (!t) return false;
       t.tg = (t.tg + 1) % TARGET_MODES.length;
       return true;
     }
     case 'abil': {
-      const t = S.T.find((q) => q.i === a.id);
+      const t = own();
       return !!t && !S.pa && !S.cd && useAbility(S, t);
     }
     case 'clear': {
       const i = a.i | 0, o = M.obs[i];
-      if (!o || S.ob[i] || S.money < o[2]) return false;
-      S.money -= o[2]; S.ob[i] = 1;
+      if (sl < 0 || !o || S.ob[i] || S.money[sl] < o[2]) return false;
+      S.money[sl] -= o[2]; S.ob[i] = 1;
       S._fx.push(['f', o[0] * CELL + 20, o[1] * CELL + 20, 40, '#9aa7ff']);
       return true;
     }
@@ -198,7 +241,7 @@ export function applyAction(S, a) {
       if (def.t === 'bomb') {
         tr.c = BOMB_CD;
         const x = def.x * CELL + 20, y = def.y * CELL + 20;
-        S._boom.push([x, y, 45 * hpMult(Math.max(1, S.w)) * M.hp, BOMB_R, 1, '#ffb03f', 1]);
+        S._boom.push([x, y, 45 * hpMult(Math.max(1, S.w)) * M.hp, BOMB_R, 1, '#ffb03f', 1, sl]); // la dinamita es de quien la detona
       } else { tr.a = GATE_T; tr.c = GATE_CD; }
       return true;
     }
@@ -215,7 +258,7 @@ export function applyAction(S, a) {
 /** Empieza ya la siguiente oleada y paga el bonus por los segundos saltados. */
 function callEarly(S, left) {
   const bonus = Math.round(skipBonus(S.w, S.ic - left) * S._m.wave);
-  if (bonus > 0) { S.money += bonus; S._fx.push(['t', 640, 340, `+${bonus} de oro por saltar`, '#ffe14a', 1.4]); }
+  if (bonus > 0) { shareGold(S, bonus); S._fx.push(['t', 640, 340, `+${bonus} de oro por saltar`, '#ffe14a', 1.4]); }
   S.ic = left;
 }
 
@@ -233,7 +276,7 @@ function useAbility(S, t) {
     case 'stw':
       for (const e of alive) {
         stunE(e, s.abT);
-        if (s.abDmg) damage(S, e, e.m * (ENEMIES[e.k].boss ? 0.05 : s.abDmg), 'x');
+        if (s.abDmg) damage(S, e, e.m * (ENEMIES[e.k].boss ? 0.05 : s.abDmg), 'x', 0, t.o);
       }
       S._fx.push(['g', col]);
       break;
@@ -249,7 +292,7 @@ function useAbility(S, t) {
       alive.sort((a, b) => str(b) - str(a));
       for (const e of alive.slice(0, s.abN)) {
         S._fx.push(['s', x, y, Math.round(e._x), Math.round(e._y), '#ffffff']);
-        if (ENEMIES[e.k].boss) damage(S, e, e.m * s.abBoss, 'x'); else damage(S, e, e.h + 1, 'x');
+        if (ENEMIES[e.k].boss) damage(S, e, e.m * s.abBoss, 'x', 0, t.o); else damage(S, e, e.h + 1, 'x', 0, t.o);
       }
       break;
     }
@@ -258,7 +301,7 @@ function useAbility(S, t) {
       for (const e of alive) {
         if (ENEMIES[e.k].fly) continue;
         if (!s.abAll && (e._x - x) ** 2 + (e._y - y) ** 2 > r * r) continue;
-        damage(S, e, e.m * (ENEMIES[e.k].boss ? 0.08 : s.abDmg), 'a');
+        damage(S, e, e.m * (ENEMIES[e.k].boss ? 0.08 : s.abDmg), 'a', 0, t.o);
         stunE(e, 3);
       }
       S._fx.push(s.abAll ? ['g', col] : ['d', x, y, Math.round(r), col]);
@@ -268,7 +311,7 @@ function useAbility(S, t) {
       let n = 0;
       for (const e of alive) {
         if (n++ < 40) S._fx.push(['z', Math.round(e._x), Math.round(e._y)]);
-        damage(S, e, s.dmg * s.abPow * dm * (e.wt > 0 ? s.wetM * S._m.shock : 1), 'e', 99);
+        damage(S, e, s.dmg * s.abPow * dm * (e.wt > 0 ? s.wetM * S._m.shock : 1), 'e', 99, t.o);
         stunE(e, 1.5);
       }
       S._fx.push(['g', col]);
@@ -286,8 +329,13 @@ function useAbility(S, t) {
 }
 
 // ---------- daño y estados alterados ----------
-/** type: k cinético · e eléctrico · x explosivo · a ácido · f fuego. prc = blindaje que ignora. */
-function damage(S, e, amt, type, prc) {
+/**
+ * type: k normal · e eléctrico · x explosivo · a ácido · f fuego. prc = blindaje que ignora.
+ * o = puesto del jugador que hace el daño (-1 = de nadie: brasas, lava, explosiones de barril).
+ * bo/bf = dueño y fuerza del tambor que potencia el golpe: si es de otro jugador, se lleva la
+ *         mitad del daño extra que aporta su tambor.
+ */
+function damage(S, e, amt, type, prc, o = -1, bo = -1, bf = 0) {
   if (e.h <= 0) return;
   const def = ENEMIES[e.k];
   if (def.armor) {
@@ -298,14 +346,27 @@ function damage(S, e, amt, type, prc) {
     }
   }
   if (e.vt > 0) amt *= 1 + e.vu;
+  const real = Math.min(amt, e.h);
+  if (o >= 0) {
+    let part = 0;
+    if (bo >= 0 && bo !== o && bf > 0) { part = real * (bf / (1 + bf)) * 0.5; e.dm[bo] += part; S.st[bo][0] += part; }
+    e.dm[o] += real - part; S.st[o][0] += real - part;
+  } else e.dn += real;
   e.h -= amt;
   if (e.h > 0) return;
   e.h = 0;
-  S.money += def.rw * S._m.kill * (1 + S._bounty); S.kills++;
+  payout(S, e); S.kills++;
   S._fx.push(['p', Math.round(e._x), Math.round(e._y), ENEMY_KEYS.indexOf(e.k)]);
   if (def.split) for (let n = 0; n < def.split; n++) S._spawn.push(['branch', e.r, Math.max(0, e.d - n * 16)]);
-  if (e.fz > 0) S._boom.push([e._x, e._y, Math.min(400, e.m * 0.3), 60, 0, '#c77dff']);
-  if (S._m.boom) S._boom.push([e._x, e._y, Math.min(500, e.m * S._m.boom), 50, 0, '#ff5a5a']);
+  if (e.fz > 0) S._boom.push([e._x, e._y, Math.min(400, e.m * 0.3), 60, 0, '#c77dff', 0, e.fo]);
+  if (S._m.boom) S._boom.push([e._x, e._y, Math.min(500, e.m * S._m.boom), 50, 0, '#ff5a5a', 0, -1]);
+}
+/** Reparte el oro de un barril roto según el daño que le hizo cada jugador. */
+function payout(S, e) {
+  const act = S.act, n = act.length, base = ENEMIES[e.k].rw * S._m.kill;
+  let tot = e.dn, pool = e.dn; // pool = daño de nadie (o de jugadores que ya no están): a partes iguales
+  for (let s = 0; s < 4; s++) { tot += e.dm[s]; if (!act.includes(s)) pool += e.dm[s]; }
+  for (const s of act) give(S, s, base * (tot > 0 ? (e.dm[s] + pool / n) / tot : 1 / n) * (1 + S._bounty[s]));
 }
 function slowE(e, f, t) {
   if (!f) return;
@@ -320,16 +381,17 @@ function vulnE(e, v, t) {
   if (e.vt <= 0 || v >= e.vu) { e.vu = v; e.vt = Math.max(e.vt, t); }
 }
 /** COMBO Explosión de aceite: un barril ACEITADO que recibe fuego explota en área. */
-function ignite(S, e) {
+function ignite(S, e, o) {
   if (e.oi <= 0 || e.h <= 0) return;
   e.oi = 0; e.oc = 3;
-  S._boom.push([e._x, e._y, Math.min(900, 25 + e.m * 0.1) * S._m.combo, 55, 1, '#ff9d00']);
+  S._boom.push([e._x, e._y, Math.min(900, 25 + e.m * 0.1) * S._m.combo, 55, 1, '#ff9d00', 0, o]); // el combo es de quien pone el fuego
   S._fx.push(['t', Math.round(e._x), Math.round(e._y) - 18, '¡BOOM!', '#ff9d00', 0.8]);
 }
-function burnE(S, e, dps, t, fire) {
+function burnE(S, e, dps, t, fire, o = -1) {
   if (!dps) return;
+  if (e.bt <= 0 || dps >= e.bn) e.bo = o; // la quemadura es de quien puso la más fuerte
   e.bn = Math.max(e.bn, dps); e.bt = Math.max(e.bt, t);
-  if (fire) ignite(S, e);
+  if (fire) ignite(S, e, o);
 }
 
 function leak(S, e) {
@@ -368,23 +430,24 @@ export function calcBuffs(S) {
   const lint = S.T.filter((t) => t.k === 'linter' && t.dz <= 0);
   const cfAll = lint.some((l) => l.at > 0 && tStats(l).abAll);
   const tById = new Map();
-  let bounty = 0;
+  const bounty = [0, 0, 0, 0];
   for (const t of S.T) {
     tById.set(t.i, t);
-    let b = 0, rr = 0, rb = 0, disc = 0, det = 0, ap = 0, cf = cfAll ? 1 : 0;
+    let bo = -1, b = 0, rr = 0, rb = 0, disc = 0, det = 0, ap = 0, cf = cfAll ? 1 : 0;
     for (const l of lint) {
       if (l === t) continue;
       const ls = tStats(l);
       if (Math.hypot(tx(l) - tx(t), ty(l) - ty(t)) > ls.range * m.range) continue;
       disc = Math.max(disc, ls.disc);
       if (t.k === 'linter') continue;
-      b = Math.max(b, ls.buff * m.tdm.linter); rr = Math.max(rr, ls.rateBuff); rb = Math.max(rb, ls.rbuff);
+      if (ls.buff * m.tdm.linter > b) { b = ls.buff * m.tdm.linter; bo = l.o; }
+      rr = Math.max(rr, ls.rateBuff); rb = Math.max(rb, ls.rbuff);
       det = det || ls.adetect; ap = Math.max(ap, ls.apierce);
       if (l.at > 0) cf = 1;
     }
-    t._b = b; t._rr = rr; t._rb = rb; t._disc = disc; t._det = det; t._ap = ap; t._cf = cf;
+    t._b = b; t._bo = bo; t._rr = rr; t._rb = rb; t._disc = disc; t._det = det; t._ap = ap; t._cf = cf;
     t._pad = M.padAt.has(t.y * COLS + t.x) ? 1 : 0;
-    if (t.k === 'backup') bounty = Math.max(bounty, tStats(t).bounty);
+    if (t.k === 'backup' && t.o >= 0) bounty[t.o] = Math.max(bounty[t.o], tStats(t).bounty);
   }
   S._bounty = bounty;
   return tById;
@@ -444,7 +507,7 @@ export function step(S, dt) {
     if (e.oc > 0) e.oc -= dt;
     if (e.cc > 0) e.cc -= dt;
     if (e.rv > 0) e.rv -= dt;
-    if (e.bt > 0) { e.bt -= dt; damage(S, e, e.bn * m.burn * dt, 'f'); } else e.bn = 0;
+    if (e.bt > 0) { e.bt -= dt; damage(S, e, e.bn * m.burn * dt, 'f', 0, e.bo); } else e.bn = 0;
     if (e.h <= 0) continue;
     if (def.regen && e.h < e.m && e.bt <= 0) e.h = Math.min(e.m, e.h + e.m * def.regen * dt);
     if (e.st > 0) {
@@ -484,7 +547,7 @@ export function step(S, dt) {
         if (e.d >= M.R[e.r].len) { leak(S, e); continue; }
         // zonas del mapa
         const z = M.zoneAt.get(Math.floor(e._y / CELL) * COLS + Math.floor(e._x / CELL));
-        if (z === 'heat') burnE(S, e, 3 + S.w * 1.5, 1, true);
+        if (z === 'heat') burnE(S, e, 3 + S.w * 1.5, 1, true, -1);
         else if (z === 'cool') e.wt = Math.max(e.wt, 2.5 * m.wet);
       }
     }
@@ -507,7 +570,7 @@ export function step(S, dt) {
       let d = base * dm;
       if (s.heavy > 1 && ENEMIES[e.k].heavy) d *= s.heavy;
       if (s.crit && Math.random() < s.crit) { d *= s.critM; S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); }
-      damage(S, e, d, type || s.type, prc);
+      damage(S, e, d, type || s.type, prc, t.o, t._bo, t._b);
     };
     if (t.c > 0) t.c -= dt;
     t.cy -= dt;
@@ -518,7 +581,7 @@ export function step(S, dt) {
         if (!list.length) break;
         t.c = s.rate * cd * (t.at > 0 ? 1 / 3 : 1);
         t.a = Math.atan2(list[0]._y - y, list[0]._x - x);
-        const one = (e) => { burnE(S, e, s.burn, s.burnT, true); slowE(e, s.slow, 1.5); hit(e, s.dmg); };
+        const one = (e) => { burnE(S, e, s.burn, s.burnT, true, t.o); slowE(e, s.slow, 1.5); hit(e, s.dmg); };
         for (const e of list) {
           if (s.line) {
             const an = Math.atan2(e._y - y, e._x - x), ex = x + Math.cos(an) * range, ey = y + Math.sin(an) * range;
@@ -528,7 +591,7 @@ export function step(S, dt) {
             S._fx.push(['b', x, y, Math.round(e._x), Math.round(e._y), col]);
             if (s.splash) {
               S._fx.push(['f', Math.round(e._x), Math.round(e._y), s.splash, col]);
-              for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) { burnE(S, o, s.burn, s.burnT, true); hit(o, s.dmg * 0.5, 'f'); }
+              for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) { burnE(S, o, s.burn, s.burnT, true, t.o); hit(o, s.dmg * 0.5, 'f'); }
             }
             one(e);
           }
@@ -550,8 +613,8 @@ export function step(S, dt) {
           for (const o of inRange(S, cx, cy, s.splash, true)) {
             slowE(o, s.slow, s.slowT); vulnE(o, s.vuln, 3);
             o.wt = Math.max(o.wt, s.wetT * m.wet);
-            burnE(S, o, s.burn, 3, false);
-            if (s.finalizer) o.fz = 3;
+            burnE(S, o, s.burn, 3, false, t.o);
+            if (s.finalizer) { o.fz = 3; o.fo = t.o; }
             hit(o, s.dmg);
           }
         }
@@ -616,8 +679,8 @@ export function step(S, dt) {
           const boss = ENEMIES[e.k].boss;
           slowE(e, s.slow, 0.25); vulnE(e, s.vuln, 0.25);
           if (e.oc <= 0) e.oi = Math.max(e.oi, s.oilT);
-          burnE(S, e, s.burn, 3, false);
-          if (s.execute && !boss && e.h < e.m * s.execute) { S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); damage(S, e, e.h + 1, 'a'); continue; }
+          burnE(S, e, s.burn, 3, false, t.o);
+          if (s.execute && !boss && e.h < e.m * s.execute) { S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); damage(S, e, e.h + 1, 'a', 0, t.o); continue; }
           hit(e, s.dps * dt * (boss ? s.bossM : 1));
         }
         break;
@@ -626,7 +689,7 @@ export function step(S, dt) {
         if (t.cy <= 0) {
           t.cy = s.period;
           const inc = Math.round(s.income * m.tdm.backup);
-          S.money += inc; S._fx.push(['m', x, y - 14, inc]);
+          give(S, t.o, inc); S._fx.push(['m', x, y - 14, inc]);
         }
         break;
       }
@@ -676,12 +739,12 @@ export function step(S, dt) {
 /** Explosiones pendientes, limpieza de muertos y fin de partida. También se usa tras una acción. */
 function finish(S) {
   for (let n = 0; n < S._boom.length && n < 80; n++) {
-    const [bx, by, bd, br, fire, col, stun] = S._boom[n];
+    const [bx, by, bd, br, fire, col, stun, own = -1] = S._boom[n];
     S._fx.push(['f', Math.round(bx), Math.round(by), br, col]);
     for (const o of inRange(S, bx, by, br, true)) {
       if (stun) stunE(o, 1);
-      damage(S, o, bd, 'x');
-      if (fire) { burnE(S, o, 4 + S.w, 2, false); ignite(S, o); }
+      damage(S, o, bd, 'x', 0, own);
+      if (fire) { burnE(S, o, 4 + S.w, 2, false, own); ignite(S, o, own); }
     }
   }
   S._boom.length = 0;
@@ -695,20 +758,25 @@ export function settle(S) { if (S.ph === 'play' && (S._boom.length || S._spawn.l
 
 function endWave(S) {
   const M = MAPS[S.map];
-  let bonus = waveBonus(S.w), heal = 0, interest = 0, cap = 0;
-  for (const t of S.T) {
-    if (t.k !== 'backup') continue;
-    const s = tStats(t);
-    bonus += s.waveBonus; heal += s.heal;
-    if (s.interest > interest) { interest = s.interest; cap = s.intCap; }
+  // bonus de oleada: a partes iguales. Lo que dan los Mercaderes es de su dueño.
+  const base = Math.round(waveBonus(S.w) * S._m.wave);
+  let total = base, heal = 0;
+  shareGold(S, base);
+  for (const sl of S.act) {
+    let wb = 0, interest = 0, cap = 0;
+    for (const t of S.T) {
+      if (t.k !== 'backup' || t.o !== sl) continue;
+      const s = tStats(t);
+      wb += s.waveBonus; heal += s.heal;
+      if (s.interest > interest) { interest = s.interest; cap = s.intCap; }
+    }
+    const extra = Math.round((wb + (interest ? Math.min(cap, Math.floor(S.money[sl] * interest)) : 0)) * S._m.wave);
+    if (extra) { give(S, sl, extra); total += extra; }
   }
-  if (interest) bonus += Math.min(cap, Math.floor(S.money * interest));
-  bonus = Math.round(bonus * S._m.wave);
-  S.money += bonus;
   if (heal && S.life < M.life) { const b = S.life; S.life = Math.min(M.life, S.life + heal); S._fx.push(['l', S.life - b]); }
-  S._fx.push(['m', 640, 300, bonus]);
+  S._fx.push(['m', 640, 300, total]);
   S.ic = 12;
-  if (S.w % 5 === 0) offerCards(S); // tras cada jefe: elegir parche
+  if (S.w % 5 === 0) offerCards(S); // tras cada jefe: elegir reliquia
   if (S.au) callEarly(S, 1);
 }
 
@@ -717,10 +785,10 @@ const r1 = (n) => Math.round(n * 10) / 10;
 
 export function pack(S, fx) {
   return JSON.stringify({
-    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: Math.floor(S.money), li: S.life, n: S.nid, ki: S.kills,
+    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => [Math.round(a[0]), Math.round(a[1])]), gi: S.gid, li: S.life, n: S.nid, ki: S.kills,
     ob: S.ob.join(''), sw: S.sw.join(''), sc: Math.ceil(Math.max(0, S.swc)), tr: S.tr.map((t) => [Math.ceil(Math.max(0, t.c)), r1(Math.max(0, t.a))]), md: S.md, cd: S.cd,
     T: S.T.map((t) => {
-      const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at))];
+      const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at)), t.o];
       if (t.s.length) a.push(t.s.map((u) => [Math.round(u.h), r1(Math.max(0, u.r)), u.e ? 1 : 0]));
       return a;
     }),
@@ -732,14 +800,14 @@ export function pack(S, fx) {
 
 export function unpack(str) {
   const o = JSON.parse(str);
-  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, life: o.li, nid: o.n, kills: o.ki,
+  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: o.st || [[0, 0], [0, 0], [0, 0], [0, 0]], gid: o.gi || '', life: o.li, nid: o.n, kills: o.ki,
     ob: String(o.ob || '').split('').map(Number), sw: String(o.sw || '').split('').map(Number), swc: o.sc || 0, tr: (o.tr || []).map((a) => ({ c: a[0], a: a[1] })),
-    md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: 0 };
+    md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0] };
   S._m = calcMods(S.md);
   const M = MAPS[S.map];
   S.T = (o.T || []).map((a) => {
-    const t = { i: a[0], k: TOWER_KEYS[a[1]], x: a[2], y: a[3], p: [Math.floor(a[4] / 100), Math.floor(a[4] / 10) % 10, a[4] % 10], tg: a[5], c: a[6], dz: a[7], inv: a[8], cy: a[9], a: a[10], ac: a[11], at: a[12],
-      s: (a[13] || []).map((u) => ({ h: u[0], r: u[1], e: 0, c: 0, f: u[2] })) };
+    const t = { i: a[0], k: TOWER_KEYS[a[1]], x: a[2], y: a[3], p: [Math.floor(a[4] / 100), Math.floor(a[4] / 10) % 10, a[4] % 10], tg: a[5], c: a[6], dz: a[7], inv: a[8], cy: a[9], a: a[10], ac: a[11], at: a[12], o: a[13],
+      s: (a[14] || []).map((u) => ({ h: u[0], r: u[1], e: 0, c: 0, f: u[2] })) };
     rally(S, t);
     return t;
   });
@@ -747,7 +815,7 @@ export function unpack(str) {
   S.E = (o.E || []).map((a) => {
     const f = a[6];
     const e = { i: a[0], k: ENEMY_KEYS[a[1]], r: a[2], d: a[3], h: a[4], m: a[5], sl: f & 1 ? 0.5 : 0, sf: 0.4, st: f & 2 ? 0.3 : 0, im: 0, b: 0, ac: 0,
-      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0 };
+      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
     place(M, e);
     return e;
   });

@@ -9,23 +9,101 @@
 </head>
 <body>
 
-<!-- ============ MENÚ ============ -->
-<section id="menu" class="screen">
+<!-- ============ ENTRAR ============ -->
+<section id="login" class="screen">
   <h1 class="logo">LEONES <span>TD</span></h1>
   <p class="tag">Defensa de la Sabana · cooperativo para 4 jugadores</p>
   <div class="card">
-    <label>Tu nombre
-      <input id="inName" maxlength="12" placeholder="leon_1" autocomplete="off">
+    <label>Nombre de usuario
+      <input id="inName" maxlength="12" placeholder="leon_1" autocomplete="username">
     </label>
-    <button id="btnCreate" class="btn primary">Crear sala</button>
-    <div class="row">
-      <input id="inCode" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
-      <button id="btnJoin" class="btn">Unirse</button>
-    </div>
-    <button id="btnSolo" class="btn ghost">Práctica en solitario</button>
-    <p id="menuMsg" class="msg"></p>
+    <label>PIN (4 números)
+      <input id="inPin" maxlength="4" inputmode="numeric" type="password" placeholder="••••" autocomplete="current-password">
+    </label>
+    <label class="check"><input id="chkRemember" type="checkbox"> Recordarme en este ordenador</label>
+    <button id="btnLogin" class="btn primary">Entrar</button>
+    <button id="btnRegister" class="btn ghost">Crear cuenta nueva</button>
+    <p id="loginMsg" class="msg"></p>
   </div>
-  <p class="hint">¡Los barriles ruedan hacia la guarida! Colocad leones, mejoradlos por 3 ramas de 5 niveles y resistid en 3 mapas: Sabana, Selva y Volcán.</p>
+  <p class="hint">Tu progreso se guarda en tu cuenta, no en el ordenador. No uses un PIN que utilices en otro sitio (móvil, banco…).</p>
+</section>
+
+<!-- ============ MENÚ PRINCIPAL ============ -->
+<section id="home" class="screen home hidden">
+  <header class="home-top">
+    <h1 class="logo small">LEONES <span>TD</span></h1>
+    <div class="who"><b id="homeName"></b><small id="homeSub"></small></div>
+  </header>
+  <div class="home-body">
+    <nav id="homeNav" class="home-nav">
+      <button class="nav sel" data-tab="jugar">Jugar</button>
+      <button class="nav" data-tab="torres">Torres</button>
+      <button class="nav" data-tab="bolsa">Bolsa</button>
+      <button class="nav" data-tab="mazos">Mazos</button>
+      <button class="nav" data-tab="misiones">Misiones</button>
+      <button class="nav" data-tab="logros">Logros</button>
+      <button class="nav" data-tab="estadisticas">Estadísticas</button>
+      <button class="nav" data-tab="perfil">Perfil</button>
+    </nav>
+    <div class="home-main">
+      <div class="tab" id="tab-jugar">
+        <h2>Jugar</h2>
+        <div class="play-grid">
+          <div class="play-card">
+            <h3>Crear sala</h3>
+            <p>Crea una sala y pasa el código de 4 letras a tu manada. Tú eliges el mapa.</p>
+            <button id="btnCreate" class="btn primary">Crear sala</button>
+          </div>
+          <div class="play-card">
+            <h3>Unirse</h3>
+            <p>Escribe el código que te han pasado.</p>
+            <div class="row">
+              <input id="inCode" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
+              <button id="btnJoin" class="btn">Unirse</button>
+            </div>
+          </div>
+          <div class="play-card">
+            <h3>Práctica</h3>
+            <p>Juega en solitario para probar torres y mapas.</p>
+            <button id="btnSolo" class="btn ghost">Práctica en solitario</button>
+          </div>
+        </div>
+        <p id="menuMsg" class="msg"></p>
+        <p class="note">Cada jugador tiene su propio oro y sus propias torres (con su color). El oro de cada barril se reparte según el daño que le haga cada uno.</p>
+      </div>
+      <div class="tab hidden" id="tab-torres">
+        <h2>Torres</h2>
+        <div id="towerGrid" class="tower-grid"></div>
+        <p class="soon">Próximamente: torres nuevas por calidades (Común, Rara, Épica y Legendaria), niveles y copias.</p>
+      </div>
+      <div class="tab hidden" id="tab-bolsa">
+        <h2>Bolsa</h2>
+        <p class="soon">Próximamente: tus filetes, los cofres sin abrir y el historial de cofres abiertos.</p>
+      </div>
+      <div class="tab hidden" id="tab-mazos">
+        <h2>Mazos</h2>
+        <p class="soon">Próximamente: elige las 6 torres con las que entras a cada partida y guarda varios mazos.</p>
+      </div>
+      <div class="tab hidden" id="tab-misiones">
+        <h2>Misiones</h2>
+        <p class="soon">Próximamente: misiones diarias y semanales que dan filetes.</p>
+      </div>
+      <div class="tab hidden" id="tab-logros">
+        <h2>Logros</h2>
+        <p class="soon">Próximamente: logros permanentes con insignias.</p>
+      </div>
+      <div class="tab hidden" id="tab-estadisticas">
+        <h2>Estadísticas</h2>
+        <div id="statGrid" class="stat-grid"></div>
+        <p class="soon">Próximamente: más detalle (torre más usada, cofres abiertos…).</p>
+      </div>
+      <div class="tab hidden" id="tab-perfil">
+        <h2>Perfil</h2>
+        <div id="profileBox" class="profile"></div>
+        <button id="btnLogout" class="btn danger">Cerrar sesión</button>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ============ SALA ============ -->
@@ -36,24 +114,24 @@
   <div id="mapSel" class="maps"></div>
   <button id="btnStart" class="btn primary">¡A defender la guarida!</button>
   <p id="lobbyMsg" class="msg"></p>
-  <button id="btnLeave" class="btn ghost">Salir</button>
+  <button id="btnLeave" class="btn ghost">Salir al menú</button>
 </section>
 
 <!-- ============ JUEGO ============ -->
 <section id="game" class="hidden">
   <header class="hud">
     <div class="stat">SALA <b id="hudCode">----</b></div>
-    <div class="stat">MAPA <b id="hudMap">-</b></div>
+    <div class="stat wide-only">MAPA <b id="hudMap">-</b></div>
     <div class="stat">OLEADA <b id="hudWave">0/20</b></div>
-    <div class="stat cpu"><i class="coin"></i><b id="hudCpu">0</b></div>
+    <div class="stat cpu" id="hudMine" title="Tu oro"><i class="coin"></i><b id="hudCpu">0</b></div>
     <div class="stat life"><i class="heart">♥</i>
       <div class="bar"><div id="hudLifeBar"></div></div><b id="hudLife">100</b>
     </div>
     <div id="hudPlayers" class="chips"></div>
     <div class="spacer"></div>
-    <button id="btnSpeed" class="btn small" title="Cambia la velocidad del juego para todos: x1, x2, x4, x6">Velocidad x1 [F]</button>
+    <button id="btnSpeed" class="btn small" title="Cambia la velocidad del juego para todos: x1, x2, x4, x6">Vel. x1 [F]</button>
     <button id="btnAuto" class="btn small" title="Las oleadas salen seguidas, sin esperar">Auto [A]: OFF</button>
-    <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra oro por los segundos saltados">Saltar [Espacio] <span id="hudNext"></span></button>
+    <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra oro por los segundos saltados">Saltar [Esp] <span id="hudNext"></span></button>
     <button id="btnChat" class="btn small ghost">Chat</button>
     <button id="btnKeys" class="btn small ghost">Ayuda [H]</button>
     <button id="btnPause" class="btn small">Pausa [P]</button>
@@ -83,9 +161,11 @@
             <tr><td><kbd>Enter</kbd></td><td>Chat</td></tr>
             <tr><td><kbd>Esc</kbd></td><td>Cancelar</td></tr>
           </table>
-          <p>Las teclas de torre actúan sobre la seleccionada o sobre la que tengas bajo el ratón.</p>
+          <p>Las teclas de torre actúan sobre la seleccionada o sobre la que tengas bajo el ratón. Solo puedes mejorar, vender o mover TUS torres (las del aro de tu color).</p>
         </div>
         <div>
+          <h3>Oro</h3>
+          <p>Cada jugador tiene su oro. El de cada barril se reparte según el daño que le hizo cada uno; el bonus de oleada y el de saltar, a partes iguales.</p>
           <h3>Mejoras (5-2-0)</h3>
           <p>3 ramas de 5 niveles. Máximo 2 ramas por torre: una hasta el nivel 5 y la otra hasta el 2. Solo puede haber un nivel 5 de cada rama en el mapa.<br>
           <b>Rama 1</b> poder bruto · <b>Rama 2</b> utilidad, detección y <b>habilidad</b> en el nivel 4 · <b>Rama 3</b> cadencia y efectos.</p>
@@ -109,6 +189,7 @@
     <div id="overlay" class="overlay hidden">
       <h2 id="ovTitle"></h2>
       <p id="ovSub"></p>
+      <table id="ovScore" class="score hidden"></table>
       <button id="ovBtn" class="btn primary"></button>
       <button id="ovBtn2" class="btn">Elegir otro mapa</button>
     </div>

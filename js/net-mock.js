@@ -3,6 +3,8 @@
 //  Sincroniza varias pestañas del MISMO navegador sin Firebase.
 //  El juego real nunca la usa.
 // ============================================================
+import { pickSeat } from './net.js';
+
 export async function connect() {
   const pid = Math.random().toString(36).slice(2, 10);
   const bc = new BroadcastChannel('cd-mock');
@@ -11,7 +13,7 @@ export async function connect() {
   let actionCb = null;
   const chatCbs = [];
   // Una clave de localStorage por dato (y por jugador) para que las pestañas no se pisen.
-  const MAPS = ['players', 'c'];
+  const MAPS = ['players', 'c', 'seats'];
   const key = (kind, id) => 'cdmock:' + code + ':' + kind + (id ? ':' + id : '');
   const read = (k) => JSON.parse(localStorage.getItem(k) || 'null');
   const loadKind = (kind) => {
@@ -25,7 +27,7 @@ export async function connect() {
   };
   // Cada pestaña guarda una copia en memoria; los cambios viajan dentro del mensaje.
   let cache = {};
-  const seed = () => { cache = {}; for (const k of ['meta', 's', 'players', 'c']) cache[k] = loadKind(k); };
+  const seed = () => { cache = {}; for (const k of ['meta', 's', 'players', 'c', 'seats']) cache[k] = loadKind(k); };
   const fire = (kind) => subs.filter((s) => s.kind === kind).forEach((s) => s.cb(cache[kind] ?? null));
   const apply = (kind, id, val) => {
     if (!MAPS.includes(kind)) { cache[kind] = val; return; }
@@ -48,21 +50,24 @@ export async function connect() {
   const api = {
     pid,
     get code() { return code; },
-    async create(name) {
+    async create(name, uid) {
       code = 'TEST';
       Object.keys(localStorage).filter((k) => k.startsWith('cdmock:')).forEach((k) => localStorage.removeItem(k));
       seed();
       put('meta', '', { host: pid, started: false });
-      put('players', pid, { name, slot: 0, at: Date.now() });
+      put('seats', uid, 0);
+      put('players', pid, { name, slot: 0, uid, at: Date.now() });
       return code;
     },
-    async join(c, name) {
+    async join(c, name, uid) {
       code = c; seed();
       if (!cache.meta) { code = ''; throw new Error('No existe ninguna sala con ese código.'); }
-      const used = Object.values(cache.players || {}).map((p) => p.slot);
-      if (used.length >= 4) { code = ''; throw new Error('La sala está llena (máximo 4 jugadores).'); }
-      let slot = 0; while (used.includes(slot)) slot++;
-      put('players', pid, { name, slot, at: Date.now() });
+      const used = Object.values(cache.players || {}).filter((p) => p.uid !== uid).map((p) => p.slot);
+      const next = pickSeat(cache.seats, uid, used);
+      if (!next) { code = ''; throw new Error('La sala está llena (máximo 4 jugadores).'); }
+      for (const u of Object.keys(cache.seats || {})) if (next[u] === undefined) put('seats', u, null);
+      put('seats', uid, next[uid]);
+      put('players', pid, { name, slot: next[uid], uid, at: Date.now() });
       return code;
     },
     on(kind, cb) { subs.push({ kind, cb }); cb(cache[kind] ?? null); },

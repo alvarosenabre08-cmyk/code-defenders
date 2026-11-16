@@ -3,7 +3,7 @@
 //  Todo se pinta por código (sin imágenes): los leones y barriles se
 //  dibujan una vez en un lienzo oculto ("sprite") y luego se reutilizan.
 // ============================================================
-import { W, H, CELL, COLS, ROWS, MAPS, TOWERS, ENEMIES, ENEMY_KEYS, pathPos, stats, skin } from './data.js';
+import { W, H, CELL, COLS, ROWS, MAPS, TOWERS, ENEMIES, ENEMY_KEYS, PLAYER_COLORS, pathPos, stats, skin } from './data.js';
 import { tStats, tRange, soldierD, epos } from './sim.js';
 
 const TAU = Math.PI * 2;
@@ -870,7 +870,10 @@ export function render(ctx, G, o) {
   for (const t of [...G.T].sort((a, b) => a.y - b.y)) {
     const x = t.x * CELL + 20, y = t.y * CELL + 20, off = t.dz > 0 || o.movingId === t.i, st = tStats(t), tier = Math.max(...t.p);
     ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(x + 1, y + 13, 17, 7, 0, 0, TAU); ctx.fill();
-    if (o.selId === t.i) { ctx.beginPath(); ctx.ellipse(x, y + 12, 21, 9, 0, 0, TAU); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); }
+    // aro del color del dueño de la torre
+    ctx.beginPath(); ctx.ellipse(x, y + 12, 18, 8, 0, 0, TAU);
+    ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = PLAYER_COLORS[t.o] || '#ffffff'; ctx.lineWidth = 2.8; ctx.stroke();
+    if (o.selId === t.i) { ctx.beginPath(); ctx.ellipse(x, y + 12, 23.5, 11, 0, 0, TAU); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); }
     if (tier >= 5 && !off) {
       // aura dorada de Tier 5
       const g = ctx.createRadialGradient(x, y, 8, x, y, 34);

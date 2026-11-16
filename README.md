@@ -15,10 +15,21 @@ No hay nada que instalar ni compilar: son archivos estáticos.
      "rules": {
        "cd_rooms": {
          "$room": { ".read": true, ".write": true }
+       },
+       "cd_names": {
+         "$uid": { ".read": true, ".write": "!data.exists()", ".validate": "newData.val() === true" }
+       },
+       "cd_users": {
+         "$uid": {
+           "$key": { ".read": true, ".write": true, ".validate": "$key.length === 64" }
+         }
        }
      }
    }
    ```
+   - `cd_rooms`: las salas de juego.
+   - `cd_names`: qué nombres de usuario están cogidos (solo se pueden crear, no cambiar).
+   - `cd_users`: el progreso de cada cuenta. Solo se puede leer conociendo la clave que sale del nombre + PIN.
 4. Rueda dentada → **Configuración del proyecto → Tus apps → icono `</>` (Web)** → registra la app.
 5. Copia el objeto `firebaseConfig` que te muestra y pégalo en `js/firebase-config.js`.
    Tiene que llevar la línea `databaseURL`. Si no aparece, cópiala de la página de Realtime Database
@@ -35,8 +46,12 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 3. Cada vez que edites un archivo en GitHub, Vercel lo vuelve a publicar solo.
 
 ## Cómo se juega
+- **Cuenta**: se entra con nombre de usuario + PIN de 4 números. El progreso se guarda en la cuenta (en Firebase), no en el ordenador.
+- **Menú principal**: Jugar, Torres, Bolsa, Mazos, Misiones, Logros, Estadísticas y Perfil. (Bolsa, Mazos, Misiones y Logros llegan en las siguientes fases.)
 - Uno crea la sala, pasa el código de 4 letras y **elige el mapa**; los demás se unen (máximo 4).
-- El oro y las vidas de la guarida son compartidos. Cualquiera puede construir, mejorar, vender o mover cualquier torre.
+- **Cada jugador tiene su propio oro, su color y sus torres**. Solo el dueño puede mejorar, vender o mover sus torres. Las vidas de la guarida son compartidas.
+- **El oro de cada barril se reparte según el daño** que le hizo cada jugador. El daño de brasas, lava y explosiones de barril se reparte a partes iguales; la dinamita cuenta para quien la detona; si tu Tamborilero potencia la torre de otro, te llevas la mitad del daño extra. El oro inicial, el bonus de oleada y el de saltar oleada se reparten a partes iguales.
+- **Si alguien se desconecta** se le guarda el sitio 15 segundos (por si recarga la página). Si no vuelve, sus torres pasan al jugador con menos torres y su oro se reparte.
 - **3 mapas**: *Sabana* (fácil, 20 oleadas), *Selva* (medio, 25: cruce con señal para desviar los barriles, cueva que se abre en la oleada 8, puente levadizo y río) y *Volcán* (difícil, 30: dos frentes, tótems de poder, 75 vidas).
 - **8 torres**: León Arquero, León Cañonero, Cuartel de Leonas, León Tamborilero, León Cazador, León Alquimista, León Chamán y León Mercader.
 - **Mapa interactivo**: rocas y troncos que se pagan para quitar, dinamita, puentes levadizos, brasas/lava y río.
@@ -57,7 +72,8 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 | `js/data.js` | Mapas, torres (3 ramas × 5 tiers), enemigos, parches y oleadas. **Aquí se equilibra el juego.** |
 | `js/sim.js` | Lógica del juego (sin DOM ni red). |
 | `js/render.js` | Dibujo en Canvas: mapas, leones, barriles y efectos. |
-| `js/net.js` | Salas, acciones, cursores, chat y estado con Firebase. |
-| `js/main.js` | Menús, HUD, ratón/teclado y unión de todo. |
+| `js/net.js` | Salas, puestos de los jugadores, acciones, cursores, chat y estado con Firebase. |
+| `js/account.js` | Cuentas: nombre + PIN, sesión y progreso guardado. |
+| `js/main.js` | Entrada, menú principal, sala, HUD, ratón/teclado y unión de todo. |
 | `js/firebase-config.js` | Tu configuración de Firebase. |
 | `js/net-mock.js` | Solo para pruebas: abre `?mock` en dos pestañas del mismo navegador para probar sin Firebase. |
