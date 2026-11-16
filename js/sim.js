@@ -1,10 +1,11 @@
 // ============================================================
 //  Leones TD — simulación (solo la ejecuta el anfitrión de la sala)
 //  Sin DOM ni red: estado puro + step() + applyAction() + pack()/unpack().
-//  Cada jugador ocupa un puesto (0-3) con su propio oro; cada torre tiene dueño (t.o).
+//  Cada jugador ocupa un puesto (0-3) con su propio oro y su mazo de torres; cada torre tiene dueño (t.o).
+//  El comportamiento de cada torre lo decide TOWERS[k].ai (varias torres comparten el mismo).
 // ============================================================
 import {
-  CELL, COLS, ROWS, MAPS, SPEEDS, MAX_TIER, TOWERS, TOWER_KEYS, ENEMIES, ENEMY_KEYS, CARDS, ABIL,
+  CELL, COLS, ROWS, MAPS, SPEEDS, MAX_TIER, TOWERS, TOWER_KEYS, ENEMIES, ENEMY_KEYS, CARDS, CARD_BASE, ABIL,
   pathPos, nearestD, genWave, hpMult, waveBonus, skipBonus, stats, pathLock, skin, calcMods,
 } from './data.js';
 
@@ -17,7 +18,27 @@ const BOMB_CD = 50, GATE_CD = 45, GATE_T = 4, SWITCH_CD = 8, BOMB_R = 95;
  * Partida nueva. act = puestos (0-3) de los jugadores presentes.
  * Cada jugador tiene su propio oro: money[puesto]. El oro inicial del mapa se reparte entre todos.
  */
-export function newGame(map = 0, act = [0]) {
+/** Bonus permanente por nivel de carta (1-5): +2,5% de daño y alcance por nivel, hasta +10%. */
+export const lvMul = (t) => 1 + 0.025 * ((t.lv || 1) - 1);
+
+/** Limpia un mazo [[clave, nivel], ...]: solo torres que existen, sin repetir y con nivel 1-5. */
+function cleanDeck(deck) {
+  const out = [];
+  for (const d of Array.isArray(deck) ? deck : []) {
+    const k = Array.isArray(d) ? d[0] : d, lv = Array.isArray(d) ? d[1] | 0 : 1;
+    if (TOWERS[k] && !out.some((x) => x[0] === k)) out.push([k, Math.max(1, Math.min(5, lv || 1))]);
+  }
+  return out.length ? out : null;
+}
+/** Fija el mazo de un jugador (solo la primera vez: no se puede cambiar a mitad de partida). */
+export function setDeck(S, slot, deck) {
+  if (slot < 0 || slot > 3 || S.dk[slot]) return false;
+  S.dk[slot] = cleanDeck(deck);
+  return !!S.dk[slot];
+}
+
+/** decks = { puesto: [[clave, nivel], ...] } (opcional; sin mazo se puede construir cualquier torre). */
+export function newGame(map = 0, act = [0], decks = null) {
   const M = MAPS[map] ? MAPS[map] : MAPS[0];
   act = [...new Set(act)].filter((s) => s >= 0 && s < 4).sort();
   if (!act.length) act = [0];
@@ -26,7 +47,8 @@ export function newGame(map = 0, act = [0]) {
     money: [0, 0, 0, 0], act, gr: 0, st: [[0, 0], [0, 0], [0, 0], [0, 0]], gid: Date.now().toString(36) + (gidN++ % 1296).toString(36),
     life: M.life, nid: 1, kills: 0, T: [], E: [],
     ob: M.obs.map(() => 0), sw: M.forks.map(() => 0), swc: 0, tr: M.traps.map(() => ({ c: 0, a: 0 })),
-    md: [], cd: null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0],
+    dk: [0, 1, 2, 3].map((i) => cleanDeck(decks && decks[i])), rvu: 0,
+    md: [], cd: null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0], _gb: 0, _gr: 0, _gs: 0, _src: null,
   };
   for (const s of act) { S.money[s] = Math.floor(M.money / act.length); S.gr |= 1 << s; }
   S._m = calcMods(S.md);
@@ -65,7 +87,7 @@ export function setRoster(S, slots) {
 // ---------- utilidades de torres ----------
 export const tStats = (t) => stats(t.k, t.p);
 /** Alcance real de la torre (incluye aura del Linter y parches). */
-export const tRange = (S, t) => tStats(t).range * (1 + (t._rb || 0)) * S._m.range;
+export const tRange = (S, t) => tStats(t).range * (1 + (t._rb || 0)) * S._m.range * (1 + (S._gr || 0)) * lvMul(t);
 export function upgradeCost(S, t, i) {
   const u = TOWERS[t.k].paths[i].ups[t.p[i]];
   return u ? Math.round(u.c * (1 - (t._disc || 0)) * (1 - S._m.upDisc)) : 0;
@@ -83,9 +105,9 @@ export function buildCost(S, k) {
   return d.cost + (d.extra ? d.extra * S.T.filter((t) => t.k === k).length : 0);
 }
 /** Máximo de torres de un tipo por jugador (0 = sin límite). El límite del mapa se reparte entre los presentes. */
-export const limitFor = (S, k) => (TOWERS[k].max ? Math.max(1, Math.floor(TOWERS[k].max / S.act.length)) : 0);
+export const limitFor = (S, k) => TOWERS[k].each || (TOWERS[k].max ? Math.max(1, Math.floor(TOWERS[k].max / S.act.length)) : 0);
 /** false si el jugador del puesto sl ya tiene el máximo de torres de ese tipo (Mercaderes). */
-export const underLimit = (S, k, sl) => !TOWERS[k].max || S.T.filter((t) => t.k === k && t.o === sl).length < limitFor(S, k);
+export const underLimit = (S, k, sl) => !limitFor(S, k) || S.T.filter((t) => t.k === k && t.o === sl).length < limitFor(S, k);
 export function cellFree(S, cx, cy, ignoreId) {
   if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
   const M = MAPS[S.map], key = cy * COLS + cx;
@@ -128,8 +150,8 @@ function syncSoldiers(S, t) {
   for (const u of t.s) if (u.h > 0) u.h = Math.max(u.h, hp * 0.5);
 }
 
-function mkTower(S, k, cx, cy, cost, o) {
-  const t = { i: S.nid++, k, o, x: cx, y: cy, p: [0, 0, 0], tg: k === 'debugger' ? 2 : 0, c: 0, dz: 0, inv: cost, cy: 2, a: 0, ac: 0, at: 0, s: [] };
+function mkTower(S, k, cx, cy, cost, o, lv) {
+  const t = { i: S.nid++, k, o, lv: lv || 1, tt: 0, rp: 0, kc: 0, x: cx, y: cy, p: [0, 0, 0], tg: TOWERS[k].tg || 0, c: 0, dz: 0, inv: cost, cy: 2, a: 0, ac: 0, at: 0, s: [] };
   syncSoldiers(S, t); rally(S, t);
   S.T.push(t);
   return t;
@@ -137,14 +159,17 @@ function mkTower(S, k, cx, cy, cost, o) {
 function mkEnemy(S, k, r, d) {
   const M = MAPS[S.map];
   const m = Math.round(ENEMIES[k].hp * hpMult(Math.max(1, S.w)) * M.hp * S._m.ehp);
-  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
+  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0, kb: 0, nr: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
   place(M, e);
   S.E.push(e);
   return e;
 }
 
 function offerCards(S) {
-  const pool = CARDS.map((_, i) => i), out = [];
+  // las "Maestrías" solo salen para torres que alguien lleva en su mazo
+  const keys = new Set();
+  for (const d of S.dk) if (d) for (const x of d) keys.add(x[0]);
+  const pool = CARDS.map((_, i) => i).filter((i) => i < CARD_BASE || !keys.size || keys.has(TOWER_KEYS[i - CARD_BASE])), out = [];
   while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   S.cd = out;
 }
@@ -155,7 +180,7 @@ export function applyAction(S, a) {
   if (!a || typeof a !== 'object') return false;
   if (a.t === 'restart') {
     if (S.ph === 'play') return false;
-    Object.assign(S, newGame(S.map, S.act));
+    Object.assign(S, newGame(S.map, S.act, S.dk));
     return true;
   }
   if (S.ph !== 'play') return false;
@@ -188,9 +213,11 @@ export function applyAction(S, a) {
       return false;
     case 'build': {
       if (sl < 0 || !TOWERS[a.k] || !underLimit(S, a.k, sl) || !cellFree(S, a.cx, a.cy)) return false;
+      const card = S.dk[sl] ? S.dk[sl].find((x) => x[0] === a.k) : [a.k, 1];
+      if (!card) return false; // esa torre no está en su mazo
       const cost = buildCost(S, a.k);
       if (S.money[sl] < cost) return false;
-      S.money[sl] -= cost; mkTower(S, a.k, a.cx, a.cy, cost, sl);
+      S.money[sl] -= cost; mkTower(S, a.k, a.cx, a.cy, cost, sl, card[1]);
       return true;
     }
     case 'up': {
@@ -266,12 +293,16 @@ function useAbility(S, t) {
   const s = tStats(t), M = MAPS[S.map];
   if (!s.ab || t.ac > 0 || t.dz > 0) return false;
   t.ac = s.abCd * S._m.abCd;
-  const x = tx(t), y = ty(t), col = skin(t.k, t.p).accent;
-  const dm = (1 + (t._b || 0)) * S._m.dmg * S._m.tdm[t.k];
+  S._src = t;
+  const x = tx(t), y = ty(t), col = skin(t.k, t.p).accent, r = tRange(S, t);
+  const dm = (1 + (t._b || 0)) * S._m.dmg * S._m.tdm[t.k] * (1 + (S._gb || 0)) * lvMul(t);
   const alive = S.E.filter((e) => e.h > 0);
+  /** Barriles a su alcance (o todos, si la habilidad es global). */
+  const near = () => (s.abAll ? alive : alive.filter((e) => (e._x - x) ** 2 + (e._y - y) ** 2 <= r * r));
+  const strong = (e) => (ENEMIES[e.k].boss ? 1e9 : 0) + e.h;
   switch (s.ab) {
     case 'lockdown':
-      for (const q of s.abAll ? S.T.filter((q) => q.k === 'firewall') : [t]) q.at = s.abT;
+      for (const q of s.abAll ? S.T.filter((q) => q.k === t.k) : [t]) q.at = s.abT;
       break;
     case 'stw':
       for (const e of alive) {
@@ -297,7 +328,6 @@ function useAbility(S, t) {
       break;
     }
     case 'prune': {
-      const r = tRange(S, t);
       for (const e of alive) {
         if (ENEMIES[e.k].fly) continue;
         if (!s.abAll && (e._x - x) ** 2 + (e._y - y) ** 2 > r * r) continue;
@@ -323,14 +353,80 @@ function useAbility(S, t) {
       S._fx.push(['l', S.life - before]);
       break;
     }
+    case 'volley': {
+      let n = 0;
+      for (const e of near()) {
+        if (n++ < 30) S._fx.push(['b', x, y, Math.round(e._x), Math.round(e._y), col]);
+        damage(S, e, s.dmg * s.abPow * dm, 'k', 99, t.o);
+      }
+      break;
+    }
+    case 'net':
+      for (const e of near()) { stunE(e, s.abT); e.wt = Math.max(e.wt, (s.wetT || 0) * S._m.wet); }
+      S._fx.push(s.abAll ? ['g', col] : ['d', x, y, Math.round(r), col]);
+      break;
+    case 'quake':
+      for (const e of alive) { knockE(S, e, s.abPow, true); stunE(e, s.abT); }
+      S._fx.push(['g', col]);
+      break;
+    case 'nova':
+      for (const e of near()) { stunE(e, s.abT); vulnE(e, s.abV, s.abT + 2); e.wt = Math.max(e.wt, 4 * S._m.wet); }
+      S._fx.push(s.abAll ? ['g', col] : ['d', x, y, Math.round(r), col]);
+      break;
+    case 'heist': {
+      const gold = Math.min(s.abCap, alive.length * s.abPow);
+      give(S, t.o, gold);
+      for (const e of alive) stunE(e, 1);
+      S._fx.push(['m', x, y - 14, gold]);
+      break;
+    }
+    case 'flock': {
+      const hitSet = new Set(alive.filter((e) => ENEMIES[e.k].fly));
+      for (const e of [...alive].sort((a, b) => strong(b) - strong(a)).slice(0, s.abN)) hitSet.add(e);
+      let n = 0;
+      for (const e of hitSet) {
+        if (n++ < 30) S._fx.push(['s', x, y, Math.round(e._x), Math.round(e._y), col]);
+        damage(S, e, s.dmg * s.abPow * dm * (ENEMIES[e.k].fly ? s.airM || 1 : 1), 'k', 99, t.o);
+      }
+      break;
+    }
+    case 'barrage':
+      for (const e of [...alive].sort((a, b) => strong(b) - strong(a)).slice(0, s.abN)) {
+        S._boom.push([e._x, e._y, s.dmg * s.abPow * dm, s.splash, s.fire ? 1 : 0, col, 0, t.o]);
+      }
+      break;
+    case 'eclipse':
+      for (const e of alive) vulnE(e, s.abV, s.abT);
+      S._fx.push(['g', '#2a1a4a']);
+      break;
+    case 'judge': {
+      const st = 1 + Math.min(s.stackMax || 0, (t.kc || 0) * (s.stack || 0));
+      for (const e of alive) damage(S, e, s.dmg * s.abPow * dm * st, 'k', 99, t.o);
+      S._fx.push(['g', col]);
+      break;
+    }
+    case 'roar':
+      for (const e of alive) stunE(e, s.abT);
+      t.at = s.abT2; // mientras dura, todas las torres atacan el doble de rápido (ver calcBuffs)
+      S._fx.push(['g', col]);
+      break;
+    case 'firerain':
+      for (const e of alive) burnE(S, e, s.abPow, s.abT, true, t.o);
+      S._fx.push(['g', '#ff6a2a']);
+      break;
+    case 'rewind':
+      for (const e of alive) { knockE(S, e, s.abPow, true); stunE(e, s.abT); }
+      S._fx.push(['g', col]);
+      break;
   }
+  S._src = null;
   S._fx.push(['t', x, y - 34, '¡' + ABIL[s.ab].n + '!', '#ffe14a', 1.1]);
   return true;
 }
 
 // ---------- daño y estados alterados ----------
 /**
- * type: k normal · e eléctrico · x explosivo · a ácido · f fuego. prc = blindaje que ignora.
+ * type: k normal · e eléctrico · x explosivo · a ácido · f fuego · c frío. prc = blindaje que ignora.
  * o = puesto del jugador que hace el daño (-1 = de nadie: brasas, lava, explosiones de barril).
  * bo/bf = dueño y fuerza del tambor que potencia el golpe: si es de otro jugador, se lleva la
  *         mitad del daño extra que aporta su tambor.
@@ -340,7 +436,7 @@ function damage(S, e, amt, type, prc, o = -1, bo = -1, bf = 0) {
   const def = ENEMIES[e.k];
   if (def.armor) {
     if (type === 'x' || type === 'a') amt *= 1.5;
-    else if (type !== 'f') {
+    else if (type !== 'f' && type !== 'c') { // el fuego y el frío no chocan contra el blindaje
       amt -= Math.max(0, def.armor - (prc || 0));
       if (amt <= 0) { if (Math.random() < 0.15) S._fx.push(['r', Math.round(e._x), Math.round(e._y)]); return; }
     }
@@ -356,6 +452,8 @@ function damage(S, e, amt, type, prc, o = -1, bo = -1, bf = 0) {
   if (e.h > 0) return;
   e.h = 0;
   payout(S, e); S.kills++;
+  const src = S._src; // torre que lo remata (para el Verdugo y el oro por remate)
+  if (src) { src.kc = (src.kc || 0) + 1; const kg = tStats(src).killGold; if (kg) give(S, src.o, kg); }
   S._fx.push(['p', Math.round(e._x), Math.round(e._y), ENEMY_KEYS.indexOf(e.k)]);
   if (def.split) for (let n = 0; n < def.split; n++) S._spawn.push(['branch', e.r, Math.max(0, e.d - n * 16)]);
   if (e.fz > 0) S._boom.push([e._x, e._y, Math.min(400, e.m * 0.3), 60, 0, '#c77dff', 0, e.fo]);
@@ -371,6 +469,14 @@ function payout(S, e) {
 function slowE(e, f, t) {
   if (!f) return;
   if (e.sl <= 0 || f >= e.sf) { e.sf = f; e.sl = Math.max(e.sl, t); }
+}
+/** Empuja al barril hacia atrás por el camino (los voladores no; los jefes, poco). */
+function knockE(S, e, px, force) {
+  const def = ENEMIES[e.k];
+  if (!px || def.fly || e.h <= 0 || (!force && e.kb > 0)) return;
+  e.kb = 1.5; e.b = 0;
+  e.d = Math.max(0, e.d - px * (def.boss ? 0.3 : 1));
+  place(MAPS[S.map], e);
 }
 function stunE(e, t) {
   if (!t) return;
@@ -428,7 +534,8 @@ function distSeg(px, py, ax, ay, bx, by) {
 export function calcBuffs(S) {
   const M = MAPS[S.map], m = S._m;
   const lint = S.T.filter((t) => t.k === 'linter' && t.dz <= 0);
-  const cfAll = lint.some((l) => l.at > 0 && tStats(l).abAll);
+  const cfAll = lint.some((l) => l.at > 0 && tStats(l).abAll) || S.T.some((q) => q.at > 0 && tStats(q).ab === 'roar');
+  let gb = 0, gr = 0, gs = 0; // Rey León (daño y alcance globales) y León del Tiempo (lentitud global): no se acumulan
   const tById = new Map();
   const bounty = [0, 0, 0, 0];
   for (const t of S.T) {
@@ -447,9 +554,11 @@ export function calcBuffs(S) {
     }
     t._b = b; t._bo = bo; t._rr = rr; t._rb = rb; t._disc = disc; t._det = det; t._ap = ap; t._cf = cf;
     t._pad = M.padAt.has(t.y * COLS + t.x) ? 1 : 0;
-    if (t.k === 'backup' && t.o >= 0) bounty[t.o] = Math.max(bounty[t.o], tStats(t).bounty);
+    const ts = tStats(t);
+    if (ts.bounty && t.o >= 0) bounty[t.o] = Math.max(bounty[t.o], ts.bounty);
+    if (t.dz <= 0) { gb = Math.max(gb, ts.gbuff || 0); gr = Math.max(gr, ts.grange || 0); gs = Math.max(gs, ts.gslow || 0); }
   }
-  S._bounty = bounty;
+  S._bounty = bounty; S._gb = gb; S._gr = gr; S._gs = gs;
   return tById;
 }
 
@@ -507,9 +616,11 @@ export function step(S, dt) {
     if (e.oc > 0) e.oc -= dt;
     if (e.cc > 0) e.cc -= dt;
     if (e.rv > 0) e.rv -= dt;
+    if (e.kb > 0) e.kb -= dt;
+    if (e.nr > 0) e.nr -= dt;
     if (e.bt > 0) { e.bt -= dt; damage(S, e, e.bn * m.burn * dt, 'f', 0, e.bo); } else e.bn = 0;
     if (e.h <= 0) continue;
-    if (def.regen && e.h < e.m && e.bt <= 0) e.h = Math.min(e.m, e.h + e.m * def.regen * dt);
+    if (def.regen && e.h < e.m && e.bt <= 0 && e.nr <= 0) e.h = Math.min(e.m, e.h + e.m * def.regen * dt);
     if (e.st > 0) {
       e.st -= dt;
     } else if (e.b) {
@@ -525,7 +636,7 @@ export function step(S, dt) {
         }
       }
     } else {
-      let nd = e.d + def.sp * (e.sl > 0 ? 1 - e.sf : 1) * dt;
+      let nd = e.d + def.sp * (e.sl > 0 ? 1 - e.sf : 1) * (1 - S._gs * (def.boss ? 0.5 : 1)) * dt;
       if (def.fly) {
         e.d = nd;
         if (nd >= M.flyLen[e.r]) { leak(S, e); continue; }
@@ -560,88 +671,115 @@ export function step(S, dt) {
     if (t.ac > 0) t.ac -= dt;
     if (t.at > 0) t.at -= dt;
     if (t.dz > 0) { t.dz -= dt; continue; }
-    const s = tStats(t), x = tx(t), y = ty(t), col = skin(t.k, t.p).accent;
+    const s = tStats(t), ai = TOWERS[t.k].ai, x = tx(t), y = ty(t), col = skin(t.k, t.p).accent;
     const range = tRange(S, t);
-    const dm = (1 + t._b) * (t._pad ? 1.3 : 1) * m.dmg * m.tdm[t.k];
+    const dm = (1 + t._b) * (t._pad ? 1.3 : 1) * m.dmg * m.tdm[t.k] * (1 + S._gb) * lvMul(t);
     const cd = m.rate / ((1 + t._rr) * (t._cf ? 2 : 1));
     const det = s.detect || t._det || m.detect;
     const prc = s.pierce + t._ap + m.pierce;
+    S._src = t;
     const hit = (e, base, type) => {
+      const def = ENEMIES[e.k];
       let d = base * dm;
-      if (s.heavy > 1 && ENEMIES[e.k].heavy) d *= s.heavy;
+      if (s.heavy > 1 && def.heavy) d *= s.heavy;
+      if (s.airM && def.fly) d *= s.airM;
+      if (s.stack) d *= 1 + Math.min(s.stackMax, (t.kc || 0) * s.stack);          // Verdugo: más fuerte con cada remate
       if (s.crit && Math.random() < s.crit) { d *= s.critM; S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); }
+      if (s.pctHp) d += e.m * s.pctHp * (def.boss ? 0.25 : 1);                      // % de la vida máxima
+      if (s.execHit && !def.boss && e.h < e.m * s.execHit) { S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); damage(S, e, e.h + 1, 'f', 99, t.o); return; }
+      if (s.wound) e.nr = Math.max(e.nr, s.wound);                                  // heridas: el barril no se repara
       damage(S, e, d, type || s.type, prc, t.o, t._bo, t._b);
+      if (s.knock && e.h > 0) knockE(S, e, s.knock);
     };
     if (t.c > 0) t.c -= dt;
     t.cy -= dt;
-    switch (t.k) {
+    // pulso periódico alrededor de la torre (Cañonero "Diluvio", rugido del Rey León)
+    if (s.pulse && t.cy <= 0 && !s.mark && ai !== 'aura' && ai !== 'backup') {
+      const all = inRange(S, x, y, range, true);
+      if (all.length) {
+        t.cy = s.pulse;
+        for (const e of all) { stunE(e, s.pulseT || 1.5); vulnE(e, s.pulseV || 0, 4); }
+        S._fx.push(['d', x, y, Math.round(Math.min(range, 400)), col]);
+      }
+    }
+    switch (ai) {
+      // ---- disparo directo: Arquero, Luchador (cuerpo a cuerpo), Bandido ----
       case 'firewall': {
+        if (t._sc > 0) t._sc -= dt;
         if (t.c > 0) break;
         const list = pick(S, x, y, range, det, t.tg, s.targets);
         if (!list.length) break;
         t.c = s.rate * cd * (t.at > 0 ? 1 / 3 : 1);
         t.a = Math.atan2(list[0]._y - y, list[0]._x - x);
-        const one = (e) => { burnE(S, e, s.burn, s.burnT, true, t.o); slowE(e, s.slow, 1.5); hit(e, s.dmg); };
+        const one = (e) => { burnE(S, e, s.burn, s.burnT, !!s.fire, t.o); slowE(e, s.slow, 1.5); stunE(e, s.stun); hit(e, s.dmg); };
         for (const e of list) {
           if (s.line) {
             const an = Math.atan2(e._y - y, e._x - x), ex = x + Math.cos(an) * range, ey = y + Math.sin(an) * range;
             S._fx.push(['s', x, y, Math.round(ex), Math.round(ey), col]);
             for (const o of S.E) if (o.h > 0 && visible(S, o, det) && distSeg(o._x, o._y, x, y, ex, ey) < 14) one(o);
           } else {
-            S._fx.push(['b', x, y, Math.round(e._x), Math.round(e._y), col]);
+            S._fx.push(s.melee ? ['f', Math.round(e._x), Math.round(e._y), 18, col] : ['b', x, y, Math.round(e._x), Math.round(e._y), col]);
             if (s.splash) {
               S._fx.push(['f', Math.round(e._x), Math.round(e._y), s.splash, col]);
-              for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) { burnE(S, o, s.burn, s.burnT, true, t.o); hit(o, s.dmg * 0.5, 'f'); }
+              for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) { burnE(S, o, s.burn, s.burnT, !!s.fire, t.o); hit(o, s.dmg * 0.5, s.fire ? 'f' : s.type); }
             }
             one(e);
           }
         }
+        if (s.steal && !(t._sc > 0)) { t._sc = s.stealCd; give(S, t.o, s.steal); S._fx.push(['m', x, y - 14, s.steal]); } // Bandido: roba mientras ataca
         break;
       }
+      // ---- bombas en área: Cañonero, Catapulta, Fénix ----
       case 'gc': {
-        if (s.pulse && t.cy <= 0) {
-          const all = inRange(S, x, y, range, true);
-          if (all.length) { t.cy = s.pulse; for (const e of all) stunE(e, 1.5); S._fx.push(['d', x, y, Math.round(range), col]); }
-        }
         if (t.c > 0) break;
         const list = pick(S, x, y, range, det, t.tg, s.targets);
         if (!list.length) break;
         t.c = s.rate * cd; t.a = Math.atan2(list[0]._y - y, list[0]._x - x);
         for (const e of list) {
           const cx = e._x, cy = e._y;
-          S._fx.push(['a', x, y, Math.round(cx), Math.round(cy), Math.round(s.splash), col]);
+          S._fx.push(['a', x, y, Math.round(cx), Math.round(cy), Math.round(s.splash), col, s.rock ? 1 : s.fireball ? 2 : 0]);
           for (const o of inRange(S, cx, cy, s.splash, true)) {
-            slowE(o, s.slow, s.slowT); vulnE(o, s.vuln, 3);
-            o.wt = Math.max(o.wt, s.wetT * m.wet);
-            burnE(S, o, s.burn, 3, false, t.o);
+            slowE(o, s.slow, s.slowT); vulnE(o, s.vuln, 3); stunE(o, s.stun);
+            if (s.wetT) o.wt = Math.max(o.wt, s.wetT * m.wet);
+            burnE(S, o, s.burn, 3, !!s.fire, t.o);
             if (s.finalizer) { o.fz = 3; o.fo = t.o; }
             hit(o, s.dmg);
           }
         }
         break;
       }
-      case 'debugger': {
+      // ---- un golpe fuerte a un objetivo: Cazador, Pescador, Halconero, Verdugo, Rey León, León del Tiempo ----
+      case 'sniper': {
         if (s.mark && t.cy <= 0) {
           const e = pick(S, x, y, range, det, 2, 1)[0];
           if (e) { t.cy = s.mark; vulnE(e, 1, 4); S._fx.push(['k', Math.round(e._x), Math.round(e._y)]); }
         }
         if (t.c > 0) break;
-        const list = pick(S, x, y, range, det, t.tg, s.targets);
+        let list = pick(S, x, y, range, det, t.tg, s.airGlobal ? 0 : s.targets);
+        if (s.airGlobal) { // Halconero: primero los voladores, estén donde estén
+          const air = S.E.filter((e) => e.h > 0 && ENEMIES[e.k].fly && visible(S, e, det)).sort((a, b) => a._rem - b._rem);
+          list = [...air, ...list.filter((e) => !ENEMIES[e.k].fly)].slice(0, s.targets);
+        }
         if (!list.length) break;
         t.c = s.rate * cd; t.a = Math.atan2(list[0]._y - y, list[0]._x - x);
         for (const e of list) {
-          S._fx.push(['s', x, y, Math.round(e._x), Math.round(e._y), col]);
+          S._fx.push(s.melee ? ['f', Math.round(e._x), Math.round(e._y), 20, col] : ['s', x, y, Math.round(e._x), Math.round(e._y), col, s.bird ? 1 : s.magic ? 2 : 0]);
           stunE(e, s.stun); slowE(e, s.slow, s.slowT);
+          if (s.wetT) e.wt = Math.max(e.wt, s.wetT * m.wet);
           if (s.reveal) e.rv = 30;
           if (s.splash) {
             S._fx.push(['f', Math.round(e._x), Math.round(e._y), s.splash, col]);
-            for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) hit(o, s.dmg * 0.4, 'x');
+            for (const o of inRange(S, e._x, e._y, s.splash, true)) if (o !== e) {
+              if (s.wetT) { o.wt = Math.max(o.wt, s.wetT * m.wet); slowE(o, s.slow, s.slowT); }
+              hit(o, s.dmg * 0.4, 'x');
+            }
           }
           hit(e, s.dmg);
         }
         break;
       }
-      case 'balancer': {
+      // ---- proyectil que salta de barril en barril: Chamán (rayo), Hondero (piedras) ----
+      case 'chain': {
         if (t.c > 0) break;
         const starts = pick(S, x, y, range, det, t.tg, s.chains);
         if (!starts.length) break;
@@ -655,7 +793,7 @@ export function step(S, dt) {
             done.add(e.i); pts.push(Math.round(e._x), Math.round(e._y));
             const ox = e._x, oy = e._y;
             slowE(e, s.slow, 1.5); stunE(e, s.stun);
-            if (e.wt > 0) {
+            if (e.wt > 0 && s.type === 'e') {
               // COMBO Descarga: barril mojado + rayo
               if (e.cc <= 0) { e.cc = 2; stunE(e, 0.25); S._fx.push(['z', Math.round(ox), Math.round(oy)]); }
               hit(e, dmg * s.wetM * m.shock);
@@ -664,12 +802,13 @@ export function step(S, dt) {
             e = inRange(S, ox, oy, s.hopR, det).filter((q) => !done.has(q.i))
               .reduce((b, q) => (!b || (q._x - ox) ** 2 + (q._y - oy) ** 2 < (b._x - ox) ** 2 + (b._y - oy) ** 2 ? q : b), null);
           }
-          S._fx.push(['c', pts, col]);
+          S._fx.push(['c', pts, col, s.type === 'e' ? 0 : 1]);
         }
         break;
       }
-      case 'docker': {
-        const list = inRange(S, x, y, range, true).filter((e) => !ENEMIES[e.k].fly);
+      // ---- zona alrededor de la torre: Alquimista (brea), Escarcha (frío) ----
+      case 'aura': {
+        const list = inRange(S, x, y, range, true).filter((e) => s.air || !ENEMIES[e.k].fly);
         if (t.cy <= 0 && list.length) {
           t.cy = s.cycle;
           for (const e of list) if (e.im <= 0) { stunE(e, s.stun); e.im = e.st + 2; }
@@ -678,11 +817,33 @@ export function step(S, dt) {
         for (const e of list) {
           const boss = ENEMIES[e.k].boss;
           slowE(e, s.slow, 0.25); vulnE(e, s.vuln, 0.25);
-          if (e.oc <= 0) e.oi = Math.max(e.oi, s.oilT);
+          if (s.oilT && e.oc <= 0) e.oi = Math.max(e.oi, s.oilT);
+          if (s.wetT) e.wt = Math.max(e.wt, s.wetT * m.wet);
           burnE(S, e, s.burn, 3, false, t.o);
           if (s.execute && !boss && e.h < e.m * s.execute) { S._fx.push(['x', Math.round(e._x), Math.round(e._y)]); damage(S, e, e.h + 1, 'a', 0, t.o); continue; }
           hit(e, s.dps * dt * (boss ? s.bossM : 1));
         }
+        break;
+      }
+      // ---- rayo continuo que coge fuerza sobre el mismo objetivo: León Solar ----
+      case 'beam': {
+        let e = t.tt ? eById.get(t.tt) : null;
+        if (!e || e.h <= 0 || !visible(S, e, det) || (e._x - x) ** 2 + (e._y - y) ** 2 > range * range) {
+          e = pick(S, x, y, range, det, t.tg, 1)[0] || null;
+          t.tt = e ? e.i : 0; t.rp = 0;
+        }
+        if (s.revealAura) for (const o of inRange(S, x, y, range, true)) o.rv = Math.max(o.rv, 1);
+        if (!e) break;
+        t.a = Math.atan2(e._y - y, e._x - x); t.rp += dt;
+        const pow = s.dps * dt * (1 + Math.min(s.rampMax, s.ramp * t.rp));
+        if (s.beams) {
+          const ex = e._x, ey = e._y;
+          const others = inRange(S, ex, ey, 90, det).filter((o) => o !== e).sort((a, b) => (a._x - ex) ** 2 + (a._y - ey) ** 2 - (b._x - ex) ** 2 - (b._y - ey) ** 2).slice(0, s.beams);
+          for (const o of others) { burnE(S, o, s.burn, 1, !!s.fire, t.o); hit(o, pow * 0.6); }
+        }
+        burnE(S, e, s.burn, 1, !!s.fire, t.o);
+        hit(e, pow);
+        if (e.h <= 0) { t.tt = 0; t.rp = 0; }
         break;
       }
       case 'backup': {
@@ -732,6 +893,7 @@ export function step(S, dt) {
       }
     }
   }
+  S._src = null;
 
   finish(S);
 }
@@ -751,7 +913,16 @@ function finish(S) {
   if (S.E.some((e) => e.h <= 0)) S.E = S.E.filter((e) => e.h > 0);
   for (const [k, r, d] of S._spawn) mkEnemy(S, k, r, d);
   S._spawn.length = 0;
-  if (S.life <= 0) { S.life = 0; S.ph = 'lost'; }
+  if (S.life <= 0) {
+    // León Fénix: se sacrifica y salva la guarida (una vez por jugador y partida)
+    const ph = S.T.find((t) => tStats(t).revive && t.o >= 0 && !(S.rvu & (1 << t.o)));
+    if (ph) {
+      const s = tStats(ph);
+      S.rvu |= 1 << ph.o; S.life = s.revive; ph.dz = 45;
+      if (s.reviveStun) for (const e of S.E) stunE(e, s.reviveStun);
+      S._fx.push(['g', '#ff6a2a'], ['t', 640, 260, '¡EL FÉNIX SALVA LA GUARIDA!', '#ffb52a', 3.5]);
+    } else { S.life = 0; S.ph = 'lost'; }
+  }
 }
 /** Llamar tras applyAction para resolver explosiones/bajas provocadas por habilidades y trampas. */
 export function settle(S) { if (S.ph === 'play' && (S._boom.length || S._spawn.length || S.E.some((e) => e.h <= 0))) finish(S); }
@@ -785,10 +956,11 @@ const r1 = (n) => Math.round(n * 10) / 10;
 
 export function pack(S, fx) {
   return JSON.stringify({
-    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => [Math.round(a[0]), Math.round(a[1])]), gi: S.gid, li: S.life, n: S.nid, ki: S.kills,
+    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => [Math.round(a[0]), Math.round(a[1])]), gi: S.gid, dk: S.dk.map((d) => (d ? d.map((x) => [TOWER_KEYS.indexOf(x[0]), x[1]]) : 0)), ru: S.rvu, li: S.life, n: S.nid, ki: S.kills,
     ob: S.ob.join(''), sw: S.sw.join(''), sc: Math.ceil(Math.max(0, S.swc)), tr: S.tr.map((t) => [Math.ceil(Math.max(0, t.c)), r1(Math.max(0, t.a))]), md: S.md, cd: S.cd,
     T: S.T.map((t) => {
-      const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at)), t.o];
+      const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at)), t.o, t.lv || 1,
+        t.tt || tStats(t).stack ? [t.tt || 0, r1(t.rp || 0), t.kc || 0] : 0];
       if (t.s.length) a.push(t.s.map((u) => [Math.round(u.h), r1(Math.max(0, u.r)), u.e ? 1 : 0]));
       return a;
     }),
@@ -800,14 +972,14 @@ export function pack(S, fx) {
 
 export function unpack(str) {
   const o = JSON.parse(str);
-  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: o.st || [[0, 0], [0, 0], [0, 0], [0, 0]], gid: o.gi || '', life: o.li, nid: o.n, kills: o.ki,
+  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: o.st || [[0, 0], [0, 0], [0, 0], [0, 0]], gid: o.gi || '', dk: (o.dk || [0, 0, 0, 0]).map((d) => (d ? d.map((x) => [TOWER_KEYS[x[0]], x[1]]) : null)), rvu: o.ru || 0, life: o.li, nid: o.n, kills: o.ki,
     ob: String(o.ob || '').split('').map(Number), sw: String(o.sw || '').split('').map(Number), swc: o.sc || 0, tr: (o.tr || []).map((a) => ({ c: a[0], a: a[1] })),
-    md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0] };
+    md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0], _gb: 0, _gr: 0, _gs: 0, _src: null };
   S._m = calcMods(S.md);
   const M = MAPS[S.map];
   S.T = (o.T || []).map((a) => {
-    const t = { i: a[0], k: TOWER_KEYS[a[1]], x: a[2], y: a[3], p: [Math.floor(a[4] / 100), Math.floor(a[4] / 10) % 10, a[4] % 10], tg: a[5], c: a[6], dz: a[7], inv: a[8], cy: a[9], a: a[10], ac: a[11], at: a[12], o: a[13],
-      s: (a[14] || []).map((u) => ({ h: u[0], r: u[1], e: 0, c: 0, f: u[2] })) };
+    const t = { i: a[0], k: TOWER_KEYS[a[1]], x: a[2], y: a[3], p: [Math.floor(a[4] / 100), Math.floor(a[4] / 10) % 10, a[4] % 10], tg: a[5], c: a[6], dz: a[7], inv: a[8], cy: a[9], a: a[10], ac: a[11], at: a[12], o: a[13], lv: a[14] || 1, tt: a[15] ? a[15][0] : 0, rp: a[15] ? a[15][1] : 0, kc: a[15] ? a[15][2] : 0,
+      s: (a[16] || []).map((u) => ({ h: u[0], r: u[1], e: 0, c: 0, f: u[2] })) };
     rally(S, t);
     return t;
   });
@@ -815,7 +987,7 @@ export function unpack(str) {
   S.E = (o.E || []).map((a) => {
     const f = a[6];
     const e = { i: a[0], k: ENEMY_KEYS[a[1]], r: a[2], d: a[3], h: a[4], m: a[5], sl: f & 1 ? 0.5 : 0, sf: 0.4, st: f & 2 ? 0.3 : 0, im: 0, b: 0, ac: 0,
-      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
+      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0, kb: 0, nr: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
     place(M, e);
     return e;
   });

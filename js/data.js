@@ -164,7 +164,18 @@ export const MAPS = MAP_DEFS.map(buildMap);
 //  Rama 1 = poder bruto · Rama 2 = utilidad + habilidad activa (Tier 4) · Rama 3 = cadencia / efectos.
 //  Tipos de daño: k normal · x explosivo · e eléctrico · a ácido  (el blindaje frena k y e).
 // ============================================================
-export const TOWER_KEYS = ['firewall', 'gc', 'thread', 'linter', 'debugger', 'docker', 'balancer', 'backup'];
+// Las 8 primeras son las torres con las que empieza toda cuenta; el resto sale en cofres.
+// (No cambies el orden: las partidas en curso guardan las torres por su posición en esta lista.)
+export const TOWER_KEYS = ['firewall', 'gc', 'thread', 'linter', 'debugger', 'docker', 'balancer', 'backup',
+  'sling', 'fisher', 'brawler', 'frost', 'bandit', 'falcon', 'catapult', 'solar', 'reaper', 'king', 'phoenix', 'time'];
+export const STARTERS = TOWER_KEYS.slice(0, 8);
+/** Calidades: 0 Común · 1 Rara · 2 Épica · 3 Legendaria */
+export const RARITY = [
+  { n: 'Común', c: '#c9d1d9' }, { n: 'Rara', c: '#4fb0ff' }, { n: 'Épica', c: '#c084f5' }, { n: 'Legendaria', c: '#ffb52a' },
+];
+/** Valores por defecto de las estadísticas: cada torre solo declara lo que cambia. */
+const D = (o) => ({ range: 0, dmg: 0, rate: 1, targets: 1, type: 'k', pierce: 0, detect: 0, heavy: 1, crit: 0, critM: 1,
+  burn: 0, burnT: 3, splash: 0, slow: 0, slowT: 1.5, stun: 0, line: 0, mark: 0, reveal: 0, ...o });
 const up = (n, c, d, m) => ({ n, c, d, m });
 
 export const ABIL = {
@@ -176,13 +187,25 @@ export const ABIL = {
   prune: { n: 'Erupción', d: 'daña y atrapa a todo lo que haya en la brea' },
   surge: { n: 'Furia del cielo', d: 'un rayo golpea y aturde a todos los barriles' },
   restore: { n: 'Poción de vida', d: 'recupera vidas de la guarida' },
+  volley: { n: 'Lluvia de piedras', d: 'una pedrada fortísima a todos los barriles a su alcance' },
+  net: { n: 'Gran red', d: 'atrapa a los barriles durante unos segundos' },
+  quake: { n: 'Terremoto', d: 'empuja hacia atrás y aturde a TODOS los barriles' },
+  nova: { n: 'Era glacial', d: 'congela a los barriles y los deja frágiles' },
+  heist: { n: 'Golpe maestro', d: 'roba oro por cada barril del mapa y los aturde' },
+  flock: { n: 'Bandada', d: 'los halcones golpean a todos los voladores y a los barriles más fuertes' },
+  barrage: { n: 'Bombardeo', d: 'una lluvia de rocas sobre los barriles más fuertes' },
+  eclipse: { n: 'Eclipse', d: 'TODOS los barriles reciben más daño durante unos segundos' },
+  judge: { n: 'Juicio final', d: 'un hachazo a TODOS los barriles' },
+  roar: { n: 'Rugido del rey', d: 'aturde a TODOS los barriles y todas las torres atacan el doble de rápido' },
+  firerain: { n: 'Lluvia de fuego', d: 'quema a TODOS los barriles y hace explotar a los aceitados' },
+  rewind: { n: 'Rebobinar', d: 'todos los barriles retroceden por el camino' },
 };
 
 export const TOWERS = {
   firewall: {
-    name: 'León Arquero', color: '#e8843c', cost: 100,
+    name: 'León Arquero', rar: 0, ai: 'firewall', color: '#e8843c', cost: 100,
     desc: 'Dispara flechas muy rápido. Daño normal: el blindaje lo frena.',
-    base: { range: 130, dmg: 9, rate: 0.18, targets: 1, type: 'k', pierce: 0, detect: 0, burn: 0, burnT: 3, splash: 0, crit: 0, critM: 1, heavy: 1, line: 0, slow: 0 },
+    base: { range: 130, dmg: 9, rate: 0.18, targets: 1, type: 'k', pierce: 0, detect: 0, burn: 0, burnT: 3, fire: 1, splash: 0, crit: 0, critM: 1, heavy: 1, line: 0, slow: 0 },
     paths: [
       { name: 'Ballesta', color: '#f2c230', ups: [
         up('Puntas afiladas', 90, '+40% de daño.', (s) => { s.dmg *= 1.4; }),
@@ -208,7 +231,7 @@ export const TOWERS = {
     ],
   },
   gc: {
-    name: 'León Cañonero', color: '#3fa9f5', cost: 175,
+    name: 'León Cañonero', rar: 0, ai: 'gc', color: '#3fa9f5', cost: 175,
     desc: 'Bombas de agua explosivas en área: ralentizan y dejan MOJADO. Fuerte contra blindados.',
     base: { range: 115, dmg: 16, rate: 1.1, splash: 55, slow: 0.4, slowT: 1.6, wetT: 2.5, targets: 1, type: 'x', pierce: 0, detect: 0, heavy: 1, vuln: 0, finalizer: 0, pulse: 0, burn: 0 },
     paths: [
@@ -236,7 +259,7 @@ export const TOWERS = {
     ],
   },
   thread: {
-    name: 'Cuartel de Leonas', color: '#e0b040', cost: 200,
+    name: 'Cuartel de Leonas', rar: 0, ai: 'thread', color: '#e0b040', cost: 200,
     desc: 'Entrena leonas que bajan al camino y frenan a los barriles cuerpo a cuerpo. Colócalo cerca del camino.',
     base: { range: 120, units: 3, uhp: 70, udmg: 8, urate: 0.6, respawn: 6, type: 'k', pierce: 0, detect: 0, heavy: 1, ghostBlock: 0, uslow: 0, shoot: 0, sdmg: 0, srate: 1, stargets: 1, big: 0, cleave: 0 },
     paths: [
@@ -264,7 +287,7 @@ export const TOWERS = {
     ],
   },
   linter: {
-    name: 'León Tamborilero', color: '#b07be8', cost: 150,
+    name: 'León Tamborilero', rar: 1, ai: 'linter', color: '#b07be8', cost: 150,
     desc: 'Apoyo: las torres que oyen su tambor hacen más daño.',
     base: { range: 100, buff: 0.2, rbuff: 0, rateBuff: 0, disc: 0, shoot: 0, sdmg: 0, srate: 1, stargets: 1, aslow: 0, type: 'k', pierce: 0, detect: 0, heavy: 1, adetect: 0, apierce: 0 },
     paths: [
@@ -292,7 +315,7 @@ export const TOWERS = {
     ],
   },
   debugger: {
-    name: 'León Cazador', color: '#e0457a', cost: 250,
+    name: 'León Cazador', rar: 1, ai: 'sniper', tg: 2, color: '#e0457a', cost: 250,
     desc: 'Lanza jabalinas a una distancia enorme. Ve camuflados e ignora el blindaje.',
     base: { range: 330, dmg: 130, rate: 2.2, targets: 1, type: 'k', pierce: 99, detect: 1, splash: 0, stun: 0, slow: 0, slowT: 2, heavy: 1, mark: 0, crit: 0, critM: 1, reveal: 0 },
     paths: [
@@ -320,7 +343,7 @@ export const TOWERS = {
     ],
   },
   docker: {
-    name: 'León Alquimista', color: '#8a5ad6', cost: 225,
+    name: 'León Alquimista', rar: 1, ai: 'aura', color: '#8a5ad6', cost: 225,
     desc: 'Su caldero cubre una zona de brea ácida: daña, deja ACEITADO y atrapa cada 6 s. Ignora el blindaje. No afecta a voladores.',
     base: { range: 75, dps: 14, stun: 2, cycle: 6, type: 'a', pierce: 0, detect: 1, heavy: 1, slow: 0, vuln: 0, execute: 0, oilT: 2.5, burn: 0, bossM: 1 },
     paths: [
@@ -348,7 +371,7 @@ export const TOWERS = {
     ],
   },
   balancer: {
-    name: 'León Chamán', color: '#35c8d8', cost: 225,
+    name: 'León Chamán', rar: 1, ai: 'chain', color: '#35c8d8', cost: 225,
     desc: 'Rayo en cadena que salta de barril en barril. DESCARGA: +60% de daño a barriles mojados.',
     base: { range: 140, dmg: 24, rate: 0.9, hops: 3, hopR: 95, fall: 0.75, chains: 1, type: 'e', pierce: 0, detect: 0, heavy: 1, slow: 0, stun: 0, wetM: 1.6 },
     paths: [
@@ -376,7 +399,7 @@ export const TOWERS = {
     ],
   },
   backup: {
-    name: 'León Mercader', color: '#f2c230', cost: 150, extra: 60, max: 4,
+    name: 'León Mercader', rar: 0, ai: 'backup', color: '#f2c230', cost: 150, extra: 60, max: 4,
     desc: 'Su puesto genera oro para su dueño cada 5 s. Cada Mercader extra cuesta 60 más. Máximo 4 entre todos.',
     base: { range: 0, income: 8, period: 5, waveBonus: 0, interest: 0, intCap: 0, heal: 0, bounty: 0, type: 'k', pierce: 0, detect: 0, heavy: 1 },
     paths: [
@@ -400,6 +423,344 @@ export const TOWERS = {
         up('Recompensas', 600, '+15% de oro por cada barril destruido.', (s) => { s.bounty = 0.15; }),
         up('Banco de la sabana', 1500, '6% de intereses (máx. 300) y +70 de oro por oleada.', (s) => { s.interest = 0.06; s.intCap = 300; s.waveBonus = 70; }),
         up('Tesoro del Rey', 4500, '10% de intereses (máx. 700) y +30% de oro por barril.', (s) => { s.interest = 0.1; s.intCap = 700; s.bounty = 0.3; }),
+      ] },
+    ],
+  },
+
+  // ======================= TORRES DE COFRE =======================
+  sling: {
+    name: 'León Hondero', rar: 0, ai: 'chain', color: '#c9a36a', cost: 85,
+    desc: 'Barato y rápido: sus piedras rebotan en un segundo barril.',
+    base: D({ range: 120, dmg: 14, rate: 0.75, hops: 1, hopR: 85, fall: 0.8, chains: 1, wetM: 1 }),
+    paths: [
+      { name: 'Piedras grandes', color: '#b8743a', ups: [
+        up('Canto rodado', 70, '+40% de daño.', (s) => { s.dmg *= 1.4; }),
+        up('Piedra afilada', 180, '+30% de daño e ignora 6 de blindaje.', (s) => { s.dmg *= 1.3; s.pierce += 6; }),
+        up('Pedrusco', 500, 'x2 de daño y aturde 0,3 s.', (s) => { s.dmg *= 2; s.stun = 0.3; }),
+        up('Roca de río', 1300, 'x2 de daño y x2 contra barriles pesados.', (s) => { s.dmg *= 2; s.heavy = 2; }),
+        up('Honda de titán', 4200, 'x3 de daño y cada pedrada EMPUJA al barril hacia atrás.', (s) => { s.dmg *= 3; s.knock = 22; }),
+      ] },
+      { name: 'Puntería', color: '#3fa9f5', ups: [
+        up('Honda larga', 60, '+20% de alcance.', (s) => { s.range *= 1.2; }),
+        up('Buen ojo', 150, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Tiro certero', 420, '20% de crítico x3.', (s) => { s.crit = 0.2; s.critM = 3; }),
+        up('Lluvia de piedras', 1200, 'HABILIDAD: una pedrada (daño ×6) a TODOS los barriles a su alcance.', (s) => { s.ab = 'volley'; s.abPow = 6; s.abCd = 40; }),
+        up('Maestro hondero', 3600, 'Crítico 35% x4. La Lluvia de piedras llega a TODO el mapa.', (s) => { s.crit = 0.35; s.critM = 4; s.abAll = 1; s.abCd = 32; }),
+      ] },
+      { name: 'Rebotes', color: '#5ad67a', ups: [
+        up('Piedra saltarina', 70, '+1 rebote.', (s) => { s.hops += 1; }),
+        up('Mano rápida', 170, 'Dispara un 25% más rápido.', (s) => { s.rate *= 0.8; }),
+        up('Carambola', 480, '+2 rebotes y más largos.', (s) => { s.hops += 2; s.hopR *= 1.2; }),
+        up('Doble honda', 1250, 'Lanza 2 piedras a la vez y +30% de daño.', (s) => { s.chains = 2; s.dmg *= 1.3; }),
+        up('Tormenta de piedras', 3800, '4 piedras, +3 rebotes, +50% de daño y más cadencia.', (s) => { s.chains = 4; s.hops += 3; s.rate *= 0.7; s.dmg *= 1.5; }),
+      ] },
+    ],
+  },
+  fisher: {
+    name: 'León Pescador', rar: 0, ai: 'sniper', color: '#4fb8c9', cost: 120,
+    desc: 'Lanza redes que frenan y MOJAN al barril. Poco daño, mucho control.',
+    base: D({ range: 150, dmg: 14, rate: 1.0, slow: 0.5, slowT: 2, wetT: 3 }),
+    paths: [
+      { name: 'Arpón', color: '#e8643c', ups: [
+        up('Anzuelo afilado', 90, 'x2 de daño.', (s) => { s.dmg *= 2; }),
+        up('Arpón', 230, 'x2,5 de daño e ignora el blindaje.', (s) => { s.dmg *= 2.5; s.pierce = 99; }),
+        up('Arpón doble', 600, 'x2,5 de daño.', (s) => { s.dmg *= 2.5; }),
+        up('Arpón ballenero', 1500, 'x2 de daño y x2,5 contra barriles pesados.', (s) => { s.dmg *= 2; s.heavy = 2.5; }),
+        up('Leviatán', 4500, 'x3 de daño y cada golpe quita un 3% de la vida máxima.', (s) => { s.dmg *= 3; s.pctHp = 0.03; }),
+      ] },
+      { name: 'Redes', color: '#6bc8f0', ups: [
+        up('Caña larga', 70, '+20% de alcance.', (s) => { s.range *= 1.2; }),
+        up('Red fina', 160, 'Ve camuflados y los DESCUBRE para todas las torres.', (s) => { s.detect = 1; s.reveal = 1; }),
+        up('Red pesada', 450, 'La red atrapa 0,7 s.', (s) => { s.stun = 0.7; }),
+        up('Gran red', 1300, 'HABILIDAD: atrapa 4 s a todos los barriles a su alcance.', (s) => { s.ab = 'net'; s.abT = 4; s.abCd = 45; }),
+        up('Red de arrastre', 3800, '3 redes a la vez. La Gran red atrapa a TODO el mapa 5 s.', (s) => { s.targets = Math.max(s.targets, 3); s.abAll = 1; s.abT = 5; s.abCd = 40; }),
+      ] },
+      { name: 'Marea', color: '#3f6fd0', ups: [
+        up('Manos rápidas', 80, 'Lanza un 25% más rápido.', (s) => { s.rate *= 0.75; }),
+        up('Red empapada', 190, 'Mojado dura el doble y ralentiza un 65%.', (s) => { s.wetT = 6; s.slow = 0.65; }),
+        up('Doble red', 520, 'Lanza a 2 objetivos.', (s) => { s.targets = Math.max(s.targets, 2); }),
+        up('Aguacero', 1300, 'Las redes salpican en área y lanza más rápido.', (s) => { s.splash = 50; s.rate *= 0.75; }),
+        up('Maremoto', 3900, '4 objetivos, mucho más rápido y ralentiza un 80%.', (s) => { s.targets = Math.max(s.targets, 4); s.rate *= 0.6; s.slow = 0.8; }),
+      ] },
+    ],
+  },
+  brawler: {
+    name: 'León Luchador', rar: 1, ai: 'firewall', color: '#e8643c', cost: 180,
+    desc: 'Cuerpo a cuerpo: pega fuerte a los barriles que pasan a su lado y los EMPUJA hacia atrás.',
+    base: D({ range: 72, dmg: 45, rate: 0.7, knock: 18, melee: 1 }),
+    paths: [
+      { name: 'Puños de hierro', color: '#b9c2cc', ups: [
+        up('Nudillos', 130, '+50% de daño.', (s) => { s.dmg *= 1.5; }),
+        up('Guantes de hierro', 320, '+40% de daño e ignora 8 de blindaje.', (s) => { s.dmg *= 1.4; s.pierce += 8; }),
+        up('Onda de choque', 800, 'Cada golpe daña en área.', (s) => { s.splash = 45; }),
+        up('Rompetoneles', 1900, 'x2 de daño y x2,5 contra barriles pesados.', (s) => { s.dmg *= 2; s.heavy = 2.5; }),
+        up('Puño del titán', 5200, 'x2,5 de daño y cada golpe quita un 4% de la vida máxima.', (s) => { s.dmg *= 2.5; s.pctHp = 0.04; }),
+      ] },
+      { name: 'Llaves', color: '#b07be8', ups: [
+        up('Brazos largos', 100, '+25% de alcance.', (s) => { s.range *= 1.25; }),
+        up('Buen olfato', 220, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Llave de cabeza', 600, 'Aturde 0,5 s.', (s) => { s.stun = 0.5; }),
+        up('Terremoto', 1600, 'HABILIDAD: empuja hacia atrás a TODOS los barriles y los aturde 1,5 s.', (s) => { s.ab = 'quake'; s.abPow = 70; s.abT = 1.5; s.abCd = 55; }),
+        up('Campeón', 4600, 'Empuja el doble. El Terremoto empuja mucho más y aturde 3 s.', (s) => { s.knock *= 2; s.abPow = 140; s.abT = 3; s.abCd = 45; }),
+      ] },
+      { name: 'Combo', color: '#ffd23f', ups: [
+        up('Jab', 110, 'Golpea un 25% más rápido.', (s) => { s.rate *= 0.75; }),
+        up('Gancho', 280, 'Golpea a 2 barriles a la vez.', (s) => { s.targets = 2; }),
+        up('Uno-dos', 700, 'Golpea un 30% más rápido.', (s) => { s.rate *= 0.7; }),
+        up('Frenesí de golpes', 1700, '3 barriles a la vez y 25% de crítico x2,5.', (s) => { s.targets = 3; s.crit = 0.25; s.critM = 2.5; }),
+        up('Huracán de puños', 4800, '5 barriles a la vez y el doble de rápido.', (s) => { s.targets = 5; s.rate *= 0.5; }),
+      ] },
+    ],
+  },
+  frost: {
+    name: 'León Escarcha', rar: 1, ai: 'aura', color: '#7fd0ff', cost: 200,
+    desc: 'Aura de frío: ralentiza y MOJA a los barriles cercanos (también a los VOLADORES) y no les deja REPARARSE. Los congela cada 8 s.',
+    base: D({ range: 95, dps: 6, type: 'c', slow: 0.3, wetT: 2, stun: 1, cycle: 8, air: 1, wound: 1, oilT: 0, vuln: 0, execute: 0, bossM: 1 }),
+    paths: [
+      { name: 'Ventisca', color: '#5ab8ff', ups: [
+        up('Viento helado', 140, 'x2 de daño.', (s) => { s.dps *= 2; }),
+        up('Granizo', 340, 'x2 de daño.', (s) => { s.dps *= 2; }),
+        up('Ventisca', 850, 'x2 de daño y +15% de aura.', (s) => { s.dps *= 2; s.range *= 1.15; }),
+        up('Cero absoluto', 2000, 'x2 de daño.', (s) => { s.dps *= 2; }),
+        up('Glaciar', 5400, 'x2,5 de daño y destruye a los barriles normales con menos del 20% de vida.', (s) => { s.dps *= 2.5; s.execute = 0.2; }),
+      ] },
+      { name: 'Hielo eterno', color: '#c9e8ff', ups: [
+        up('Aura amplia', 120, '+20% de aura.', (s) => { s.range *= 1.2; }),
+        up('Escarcha profunda', 260, 'Congela 0,5 s más.', (s) => { s.stun += 0.5; }),
+        up('Permafrost', 700, 'Congela cada 5 s.', (s) => { s.cycle = 5; }),
+        up('Era glacial', 1700, 'HABILIDAD: congela 4 s a los barriles a su alcance y los deja frágiles (+30% de daño recibido).', (s) => { s.ab = 'nova'; s.abT = 4; s.abV = 0.3; s.abCd = 50; }),
+        up('Invierno eterno', 4800, 'Congela cada 3 s. La Era glacial afecta a TODO el mapa.', (s) => { s.cycle = 3; s.abAll = 1; s.abCd = 45; }),
+      ] },
+      { name: 'Escarcha', color: '#9ff0e8', ups: [
+        up('Frío intenso', 110, 'Ralentiza un 45%.', (s) => { s.slow = 0.45; }),
+        up('Humedad', 250, 'Ralentiza un 55% y Mojado dura más.', (s) => { s.slow = 0.55; s.wetT = 5; }),
+        up('Fragilidad', 650, 'Los barriles dentro reciben +15% de daño de todo.', (s) => { s.vuln = 0.15; }),
+        up('Niebla helada', 1500, '+25% de aura y ralentiza un 65%.', (s) => { s.range *= 1.25; s.slow = 0.65; }),
+        up('Corazón de hielo', 4400, 'Ralentiza un 75% y los barriles reciben +30% de daño.', (s) => { s.slow = 0.75; s.vuln = 0.3; }),
+      ] },
+    ],
+  },
+  bandit: {
+    name: 'León Bandido', rar: 1, ai: 'firewall', color: '#8a7ae6', cost: 170, max: 4,
+    desc: 'Lanza dagas y ROBA 1 de oro cada 1,5 s mientras ataca. Máximo 4 entre todos.',
+    base: D({ range: 115, dmg: 14, rate: 0.4, steal: 1, stealCd: 1.5, bounty: 0 }),
+    paths: [
+      { name: 'Dagas', color: '#e8344a', ups: [
+        up('Filo', 110, '+80% de daño.', (s) => { s.dmg *= 1.8; }),
+        up('Dagas perforantes', 280, '+60% de daño e ignora 8 de blindaje.', (s) => { s.dmg *= 1.6; s.pierce += 8; }),
+        up('Puñalada', 700, '20% de crítico x3.', (s) => { s.crit = 0.2; s.critM = 3; }),
+        up('Veneno', 1700, 'Envenena: 18 de daño/s durante 3 s.', (s) => { s.burn = 18; }),
+        up('Asesino', 5000, 'x3,5 de daño y 35% de crítico x4.', (s) => { s.dmg *= 3.5; s.crit = 0.35; s.critM = 4; }),
+      ] },
+      { name: 'Emboscada', color: '#3fa9f5', ups: [
+        up('Lanzamiento largo', 80, '+20% de alcance.', (s) => { s.range *= 1.2; }),
+        up('Ojo de ladrón', 190, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Doble daga', 520, 'Lanza a 2 objetivos.', (s) => { s.targets = 2; }),
+        up('Golpe maestro', 1500, 'HABILIDAD: roba 4 de oro por cada barril del mapa (máx. 150) y los aturde 1 s.', (s) => { s.ab = 'heist'; s.abPow = 4; s.abCap = 150; s.abCd = 60; }),
+        up('Rey de los ladrones', 4300, '3 objetivos. El Golpe maestro roba 8 por barril (máx. 400).', (s) => { s.targets = 3; s.abPow = 8; s.abCap = 400; }),
+      ] },
+      { name: 'Botín', color: '#ffd23f', ups: [
+        up('Manos largas', 120, 'Roba cada 1,1 s.', (s) => { s.stealCd = 1.1; }),
+        up('Recompensa', 300, '+10% de oro por barril para su dueño.', (s) => { s.bounty = 0.1; }),
+        up('Saqueo', 700, 'Roba 2 de oro cada vez.', (s) => { s.steal = 2; }),
+        up('Tesorero', 1700, 'Roba 3 de oro y +20% de oro por barril.', (s) => { s.steal = 3; s.bounty = 0.2; }),
+        up('Gran golpe', 4600, 'Roba 5 de oro y +30% de oro por barril.', (s) => { s.steal = 5; s.bounty = 0.3; }),
+      ] },
+    ],
+  },
+  falcon: {
+    name: 'León Halconero', rar: 1, ai: 'sniper', color: '#b8743a', cost: 220,
+    desc: 'Su halcón caza a los barriles VOLADORES en cualquier punto del mapa (daño x2). También ataca a los de tierra cercanos.',
+    base: D({ range: 140, dmg: 55, rate: 0.9, airGlobal: 1, airM: 2, bird: 1 }),
+    paths: [
+      { name: 'Garras', color: '#e8643c', ups: [
+        up('Garras afiladas', 150, '+50% de daño.', (s) => { s.dmg *= 1.5; }),
+        up('Pico de acero', 380, '+40% de daño e ignora el blindaje.', (s) => { s.dmg *= 1.4; s.pierce = 99; }),
+        up('Águila real', 900, 'x2 de daño.', (s) => { s.dmg *= 2; }),
+        up('Depredador', 2100, 'x2 de daño y x3 contra voladores.', (s) => { s.dmg *= 2; s.airM = 3; }),
+        up('Roc', 5600, 'x3 de daño y x2 contra barriles pesados.', (s) => { s.dmg *= 3; s.heavy = 2; }),
+      ] },
+      { name: 'Cetrería', color: '#6fd65a', ups: [
+        up('Vuelo alto', 110, '+25% de alcance.', (s) => { s.range *= 1.25; }),
+        up('Vista de halcón', 250, 'Ve camuflados y los DESCUBRE para todas las torres.', (s) => { s.detect = 1; s.reveal = 1; }),
+        up('Picado', 650, 'Aturde 0,5 s.', (s) => { s.stun = 0.5; }),
+        up('Bandada', 1600, 'HABILIDAD: golpe (daño ×5) a todos los voladores y a los 6 barriles más fuertes.', (s) => { s.ab = 'flock'; s.abPow = 5; s.abN = 6; s.abCd = 45; }),
+        up('Señor de los cielos', 4600, 'Caza por TODO el mapa también en tierra. La Bandada pega ×12 a los 15 más fuertes.', (s) => { s.range = 9999; s.abPow = 12; s.abN = 15; }),
+      ] },
+      { name: 'Bandada', color: '#ffd23f', ups: [
+        up('Aleteo rápido', 130, 'Ataca un 25% más rápido.', (s) => { s.rate *= 0.75; }),
+        up('Segundo halcón', 340, 'Ataca a 2 objetivos.', (s) => { s.targets = 2; }),
+        up('Vuelo rasante', 800, 'Un 30% más rápido y ralentiza un 30%.', (s) => { s.rate *= 0.7; s.slow = 0.3; }),
+        up('Tercer halcón', 1900, 'Ataca a 3 objetivos.', (s) => { s.targets = 3; }),
+        up('Nube de halcones', 5000, '5 objetivos y mucho más rápido.', (s) => { s.targets = 5; s.rate *= 0.6; }),
+      ] },
+    ],
+  },
+  catapult: {
+    name: 'León Catapulta', rar: 2, ai: 'gc', color: '#b09a80', cost: 380,
+    desc: 'Lanza rocas a CUALQUIER punto del mapa. Lenta, pero golpea en área y destroza a los blindados.',
+    base: D({ range: 9999, dmg: 60, rate: 3.4, splash: 60, type: 'x', rock: 1, wetT: 0, vuln: 0, finalizer: 0, pulse: 0 }),
+    paths: [
+      { name: 'Roca gigante', color: '#b8743a', ups: [
+        up('Roca maciza', 250, '+50% de daño.', (s) => { s.dmg *= 1.5; }),
+        up('Contrapeso', 600, '+40% de daño y +20% de radio.', (s) => { s.dmg *= 1.4; s.splash *= 1.2; }),
+        up('Roca aturdidora', 1400, 'x1,5 de daño y aturde 0,8 s a todo lo que alcanza.', (s) => { s.dmg *= 1.5; s.stun = 0.8; }),
+        up('Peñasco', 3200, 'x2 de daño y x2 contra barriles pesados.', (s) => { s.dmg *= 2; s.heavy = 2; }),
+        up('Meteorito', 8000, 'x2,5 de daño, radio enorme y FUEGO: quema 35/s y hace explotar a los aceitados.', (s) => { s.dmg *= 2.5; s.splash *= 1.4; s.burn = 35; s.fire = 1; }),
+      ] },
+      { name: 'Artillería', color: '#3fa9f5', ups: [
+        up('Engranajes', 200, 'Dispara un 20% más rápido.', (s) => { s.rate *= 0.8; }),
+        up('Catalejo', 420, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Roca marcada', 1100, 'Los barriles alcanzados reciben +20% de daño de todo durante 3 s.', (s) => { s.vuln = 0.2; }),
+        up('Bombardeo', 2600, 'HABILIDAD: 8 rocas (daño ×2) sobre los barriles más fuertes.', (s) => { s.ab = 'barrage'; s.abN = 8; s.abPow = 2; s.abCd = 50; }),
+        up('Asedio', 7000, 'Dispara un 30% más rápido. El Bombardeo lanza 20 rocas.', (s) => { s.rate *= 0.7; s.abN = 20; }),
+      ] },
+      { name: 'Metralla', color: '#ffd23f', ups: [
+        up('Doble carga', 300, 'Lanza 2 rocas a la vez.', (s) => { s.targets = 2; }),
+        up('Recarga rápida', 650, 'Dispara un 20% más rápido.', (s) => { s.rate *= 0.8; }),
+        up('Triple carga', 1500, 'Lanza 3 rocas a la vez.', (s) => { s.targets = 3; }),
+        up('Cascotes', 3400, '+30% de radio y las esquirlas hacen 12 de daño/s durante 3 s.', (s) => { s.splash *= 1.3; s.burn = 12; }),
+        up('Lluvia de rocas', 7500, '6 rocas a la vez y más rápido.', (s) => { s.targets = 6; s.rate *= 0.75; }),
+      ] },
+    ],
+  },
+  solar: {
+    name: 'León Solar', rar: 2, ai: 'beam', tg: 2, color: '#ffc83d', cost: 420,
+    desc: 'Rayo de sol continuo que hace MÁS daño cuanto más tiempo lleva sobre el mismo barril (hasta x4). Ignora el blindaje.',
+    base: D({ range: 150, dps: 40, type: 'f', ramp: 0.5, rampMax: 3, beams: 0, revealAura: 0 }),
+    paths: [
+      { name: 'Lupa', color: '#ff8a2a', ups: [
+        up('Lente pulida', 280, '+50% de daño.', (s) => { s.dps *= 1.5; }),
+        up('Foco', 650, 'El rayo puede llegar a x6.', (s) => { s.rampMax = 5; }),
+        up('Rayo concentrado', 1500, 'x1,8 de daño.', (s) => { s.dps *= 1.8; }),
+        up('Lente de cristal', 3400, 'x2 de daño y x2 contra barriles pesados.', (s) => { s.dps *= 2; s.heavy = 2; }),
+        up('Supernova', 8500, 'x2,5 de daño y el rayo puede llegar a x12.', (s) => { s.dps *= 2.5; s.rampMax = 11; }),
+      ] },
+      { name: 'Amanecer', color: '#ffe14a', ups: [
+        up('Luz lejana', 220, '+20% de alcance.', (s) => { s.range *= 1.2; }),
+        up('Luz reveladora', 480, 'Ve camuflados y DESCUBRE a todos los que tenga a su alcance.', (s) => { s.detect = 1; s.revealAura = 1; }),
+        up('Rayo abrasador', 1200, 'Quema 15/s y hace explotar a los aceitados.', (s) => { s.burn = 15; s.fire = 1; }),
+        up('Eclipse', 2800, 'HABILIDAD: durante 6 s TODOS los barriles reciben +50% de daño.', (s) => { s.ab = 'eclipse'; s.abT = 6; s.abV = 0.5; s.abCd = 60; }),
+        up('Mediodía', 7500, 'Quema 40/s. El Eclipse dura 10 s y da +100% de daño.', (s) => { s.burn = 40; s.abT = 10; s.abV = 1; }),
+      ] },
+      { name: 'Prisma', color: '#c77dff', ups: [
+        up('Prisma', 300, 'El rayo se divide: daña también al barril más cercano al objetivo (60%).', (s) => { s.beams = 1; }),
+        up('Calentamiento', 650, 'El rayo coge fuerza el doble de rápido.', (s) => { s.ramp = 1; }),
+        up('Doble prisma', 1500, 'Se divide en 2 rayos más.', (s) => { s.beams = 2; }),
+        up('Arcoíris', 3300, 'Se divide en 3 rayos más y +15% de alcance.', (s) => { s.beams = 3; s.range *= 1.15; }),
+        up('Caleidoscopio', 8000, 'Se divide en 6 rayos más y coge fuerza aún más rápido.', (s) => { s.beams = 6; s.ramp = 1.5; }),
+      ] },
+    ],
+  },
+  reaper: {
+    name: 'León Verdugo', rar: 2, ai: 'sniper', color: '#c0455a', cost: 400,
+    desc: 'Hachazo lento y brutal que impide REPARARSE al barril. Cada barril que REMATA le da +1% de daño para el resto de la partida (máx. +100%).',
+    base: D({ range: 120, dmg: 125, rate: 1.6, stack: 0.01, stackMax: 1, melee: 1, wound: 5 }),
+    paths: [
+      { name: 'Hacha', color: '#e8344a', ups: [
+        up('Hacha afilada', 260, '+50% de daño.', (s) => { s.dmg *= 1.5; }),
+        up('Hacha pesada', 620, '+40% de daño e ignora el blindaje.', (s) => { s.dmg *= 1.4; s.pierce = 99; }),
+        up('Tajo', 1500, 'x1,5 de daño y el hachazo daña en área.', (s) => { s.dmg *= 1.5; s.splash = 50; }),
+        up('Decapitador', 3300, 'x1,6 de daño y REMATA a los barriles normales con menos del 15% de vida.', (s) => { s.dmg *= 1.6; s.execHit = 0.15; }),
+        up('Segador', 8200, 'x2,2 de daño, remata por debajo del 30% y puede acumular hasta +300%.', (s) => { s.dmg *= 2.2; s.execHit = 0.3; s.stackMax = 3; }),
+      ] },
+      { name: 'Sentencia', color: '#b07be8', ups: [
+        up('Brazo largo', 200, '+25% de alcance.', (s) => { s.range *= 1.25; }),
+        up('Olfato de sangre', 450, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Miedo', 1100, 'Aturde 0,3 s y ralentiza un 40%.', (s) => { s.stun = 0.3; s.slow = 0.4; s.slowT = 2; }),
+        up('Juicio final', 2700, 'HABILIDAD: un hachazo (daño ×3) a TODOS los barriles.', (s) => { s.ab = 'judge'; s.abPow = 3; s.abCd = 60; }),
+        up('Verdugo real', 7200, '+2% por barril rematado. El Juicio final pega ×8.', (s) => { s.stack = 0.02; s.abPow = 8; }),
+      ] },
+      { name: 'Sed de batalla', color: '#ffd23f', ups: [
+        up('Furia', 240, 'Ataca un 25% más rápido.', (s) => { s.rate *= 0.75; }),
+        up('Botín de guerra', 550, '+3 de oro por cada barril que remata.', (s) => { s.killGold = 3; }),
+        up('Torbellino', 1400, '2 objetivos y un 20% más rápido.', (s) => { s.targets = 2; s.rate *= 0.8; }),
+        up('Sanguinario', 3200, '+2% por barril rematado y un 25% más rápido.', (s) => { s.stack = 0.02; s.rate *= 0.75; }),
+        up('Carnicero', 7800, '4 objetivos y +8 de oro por barril rematado.', (s) => { s.targets = 4; s.killGold = 8; }),
+      ] },
+    ],
+  },
+  king: {
+    name: 'Rey León', rar: 3, ai: 'sniper', color: '#ffd23f', cost: 700, each: 1,
+    desc: 'Su presencia da +8% de daño a TODAS las torres del mapa. Ruge cada 10 s y aturde a los barriles cercanos. Solo 1 por jugador.',
+    base: D({ range: 130, dmg: 60, rate: 1.0, gbuff: 0.08, grange: 0, pulse: 10, pulseT: 1, pulseV: 0, melee: 1 }),
+    paths: [
+      { name: 'Garra real', color: '#e8643c', ups: [
+        up('Zarpazo', 400, '+60% de daño.', (s) => { s.dmg *= 1.6; }),
+        up('Garras de oro', 950, '+50% de daño e ignora el blindaje.', (s) => { s.dmg *= 1.5; s.pierce = 99; }),
+        up('Zarpazo doble', 2200, 'x1,5 de daño y 2 objetivos.', (s) => { s.dmg *= 1.5; s.targets = 2; }),
+        up('Ira del rey', 4800, 'x2 de daño y sus zarpazos dañan en área.', (s) => { s.dmg *= 2; s.splash = 55; }),
+        up('Rey de reyes', 11000, 'x2 de daño, 4 objetivos y 30% de crítico x3.', (s) => { s.dmg *= 2; s.targets = 4; s.crit = 0.3; s.critM = 3; }),
+      ] },
+      { name: 'Rugido', color: '#b07be8', ups: [
+        up('Rugido potente', 350, 'El rugido aturde 2 s.', (s) => { s.pulseT = 2; }),
+        up('Voz de mando', 800, 'Ve camuflados y ruge cada 7 s.', (s) => { s.detect = 1; s.pulse = 7; }),
+        up('Rugido atronador', 1900, '+30% de alcance y el rugido deja a los barriles frágiles (+20% de daño).', (s) => { s.range *= 1.3; s.pulseV = 0.2; }),
+        up('Rugido del rey', 4500, 'HABILIDAD: aturde 4 s a TODOS los barriles y todas las torres atacan el doble de rápido 6 s.', (s) => { s.ab = 'roar'; s.abT = 4; s.abT2 = 6; s.abCd = 70; }),
+        up('Soberano', 10000, 'Ruge cada 4 s. La habilidad aturde 6 s y acelera 10 s.', (s) => { s.pulse = 4; s.abT = 6; s.abT2 = 10; }),
+      ] },
+      { name: 'Corona', color: '#ffd23f', ups: [
+        up('Corona de bronce', 450, '+12% de daño a todas las torres.', (s) => { s.gbuff = 0.12; }),
+        up('Corona de plata', 1000, '+16% de daño y +5% de alcance a todas las torres.', (s) => { s.gbuff = 0.16; s.grange = 0.05; }),
+        up('Corona de oro', 2400, '+20% de daño a todas las torres.', (s) => { s.gbuff = 0.2; }),
+        up('Estandarte real', 5000, '+25% de daño y +8% de alcance a todas las torres.', (s) => { s.gbuff = 0.25; s.grange = 0.08; }),
+        up('Imperio', 12000, '+35% de daño y +12% de alcance a todas las torres.', (s) => { s.gbuff = 0.35; s.grange = 0.12; }),
+      ] },
+    ],
+  },
+  phoenix: {
+    name: 'León Fénix', rar: 3, ai: 'gc', color: '#ff6a2a', cost: 650, each: 1,
+    desc: 'Bolas de fuego en área que queman y hacen explotar a los aceitados. Si la guarida cae, se sacrifica y la deja con 20 vidas (una vez por partida). Solo 1 por jugador.',
+    base: D({ range: 150, dmg: 55, rate: 1.3, splash: 55, type: 'f', burn: 12, fire: 1, revive: 20, reviveStun: 0, wetT: 0, vuln: 0, finalizer: 0, pulse: 0, fireball: 1 }),
+    paths: [
+      { name: 'Llamarada', color: '#ff2a1a', ups: [
+        up('Brasas', 350, '+50% de daño.', (s) => { s.dmg *= 1.5; }),
+        up('Llama azul', 850, '+40% de daño y quema 25/s.', (s) => { s.dmg *= 1.4; s.burn = 25; }),
+        up('Bola de fuego', 2000, 'x1,8 de daño y +30% de radio.', (s) => { s.dmg *= 1.8; s.splash *= 1.3; }),
+        up('Infierno', 4600, 'x2 de daño y quema 50/s.', (s) => { s.dmg *= 2; s.burn = 50; }),
+        up('Sol naciente', 11000, 'x2,5 de daño, quema 110/s y radio enorme.', (s) => { s.dmg *= 2.5; s.burn = 110; s.splash *= 1.3; }),
+      ] },
+      { name: 'Renacer', color: '#ffd23f', ups: [
+        up('Cenizas', 300, 'Al renacer deja la guarida con 30 vidas.', (s) => { s.revive = 30; }),
+        up('Ojo de fuego', 700, 'Ve barriles camuflados.', (s) => { s.detect = 1; }),
+        up('Renacimiento', 1700, 'Deja 40 vidas y, al renacer, aturde 4 s a todos los barriles.', (s) => { s.revive = 40; s.reviveStun = 4; }),
+        up('Lluvia de fuego', 4200, 'HABILIDAD: quema a TODOS los barriles (40/s durante 5 s) y hace explotar a los aceitados.', (s) => { s.ab = 'firerain'; s.abPow = 40; s.abT = 5; s.abCd = 60; }),
+        up('Ave inmortal', 10000, 'Deja 60 vidas al renacer. La Lluvia de fuego quema 120/s.', (s) => { s.revive = 60; s.abPow = 120; }),
+      ] },
+      { name: 'Plumas', color: '#ff9d4a', ups: [
+        up('Aleteo', 380, 'Dispara un 25% más rápido.', (s) => { s.rate *= 0.75; }),
+        up('Dos llamas', 900, 'Lanza 2 bolas de fuego.', (s) => { s.targets = 2; }),
+        up('Vuelo ardiente', 2100, 'Un 25% más rápido y +20% de alcance.', (s) => { s.rate *= 0.75; s.range *= 1.2; }),
+        up('Tres llamas', 4800, 'Lanza 3 bolas de fuego.', (s) => { s.targets = 3; }),
+        up('Tormenta ígnea', 11500, '5 bolas de fuego y más rápido.', (s) => { s.targets = 5; s.rate *= 0.7; }),
+      ] },
+    ],
+  },
+  time: {
+    name: 'León del Tiempo', rar: 3, ai: 'sniper', tg: 2, color: '#5fe0d0', cost: 700, each: 1,
+    desc: 'Ralentiza un 8% a TODOS los barriles del mapa. Sus golpes los "envejecen": quitan un 3% de su vida máxima (menos a los jefes) y no les dejan REPARARSE. Solo 1 por jugador.',
+    base: D({ range: 140, dmg: 45, rate: 1.2, pctHp: 0.03, gslow: 0.08, magic: 1, wound: 4 }),
+    paths: [
+      { name: 'Paradoja', color: '#b07be8', ups: [
+        up('Arena del tiempo', 400, 'Quita un 4% de la vida máxima.', (s) => { s.pctHp = 0.04; }),
+        up('Óxido', 950, 'x2 de daño e ignora el blindaje.', (s) => { s.dmg *= 2; s.pierce = 99; }),
+        up('Envejecer', 2200, 'Quita un 6% y ralentiza un 30%.', (s) => { s.pctHp = 0.06; s.slow = 0.3; s.slowT = 2; }),
+        up('Polvo', 5000, 'Quita un 8% y ataca a 2 objetivos.', (s) => { s.pctHp = 0.08; s.targets = 2; }),
+        up('Fin de los tiempos', 12000, 'Quita un 12% y ataca a 3 objetivos.', (s) => { s.pctHp = 0.12; s.targets = 3; }),
+      ] },
+      { name: 'Rebobinar', color: '#3fa9f5', ups: [
+        up('Reloj largo', 300, '+25% de alcance.', (s) => { s.range *= 1.25; }),
+        up('Ojo del tiempo', 700, 'Ve camuflados y los DESCUBRE para todas las torres.', (s) => { s.detect = 1; s.reveal = 1; }),
+        up('Bucle', 1800, 'Aturde 0,5 s.', (s) => { s.stun = 0.5; }),
+        up('Rebobinar', 4400, 'HABILIDAD: TODOS los barriles retroceden un buen tramo del camino.', (s) => { s.ab = 'rewind'; s.abPow = 220; s.abT = 0; s.abCd = 75; }),
+        up('Señor del tiempo', 10500, 'Rebobinar los manda el doble de lejos y los aturde 2 s.', (s) => { s.abPow = 450; s.abT = 2; s.abCd = 60; }),
+      ] },
+      { name: 'Cámara lenta', color: '#5fe0d0', ups: [
+        up('Tic', 450, 'Ralentiza un 12% a todos los barriles.', (s) => { s.gslow = 0.12; }),
+        up('Tac', 1000, 'Ralentiza un 16% a todos los barriles.', (s) => { s.gslow = 0.16; }),
+        up('Reloj de arena', 2300, 'Ralentiza un 20% y ataca un 20% más rápido.', (s) => { s.gslow = 0.2; s.rate *= 0.8; }),
+        up('Tiempo detenido', 5000, 'Ralentiza un 25% a todos los barriles.', (s) => { s.gslow = 0.25; }),
+        up('Eternidad', 12000, 'Ralentiza un 32% a todos los barriles.', (s) => { s.gslow = 0.32; }),
       ] },
     ],
   },
@@ -463,6 +824,8 @@ export const ENEMIES = {
 //  RELIQUIAS (cartas roguelike): se elige 1 de 3 al empezar y tras cada jefe.
 //  e(m) modifica los multiplicadores globales; now(S) es un efecto inmediato.
 // ============================================================
+/** Número de reliquias generales; a partir de ahí hay una "Maestría" por cada torre (mismo orden que TOWER_KEYS). */
+export const CARD_BASE = 16;
 export const CARDS = [
   { n: 'Sangre caliente', d: 'Todas las torres atacan un 12% más rápido.', e: (m) => { m.rate *= 0.89; } },
   { n: 'Vista de lince', d: '+10% de alcance para todas las torres.', e: (m) => { m.range *= 1.1; } },
@@ -482,7 +845,7 @@ export const CARDS = [
   { n: 'Pacto con las hienas', d: '+700 de oro ahora (a repartir), pero los barriles futuros tienen +8% de vida.', e: (m) => { m.ehp *= 1.08; }, now: (S, share) => share(700) },
   ...TOWER_KEYS.map((k) => ({
     n: 'Maestría: ' + TOWERS[k].name,
-    d: k === 'backup' ? 'Los Mercaderes generan +25% de oro.' : k === 'linter' ? 'Los tambores dan un 25% más de bonificación.' : k === 'thread' ? 'Las leonas y lanzas del Cuartel hacen +25% de daño.' : `Los ${TOWERS[k].name} hacen +25% de daño.`,
+    d: k === 'backup' ? 'Los Mercaderes generan +25% de oro.' : k === 'linter' ? 'Los tambores dan un 25% más de bonificación.' : k === 'thread' ? 'Las leonas y lanzas del Cuartel hacen +25% de daño.' : `${TOWERS[k].name}: +25% de daño.`,
     e: (m) => { m.tdm[k] *= 1.25; },
   })),
 ];

@@ -5,16 +5,18 @@
 //  instantáneas; los demás envían acciones y dibujan lo que reciben.
 //  Si el anfitrión se va, el jugador más antiguo de la sala hereda el puesto.
 //
-//  Cada jugador entra con su cuenta y ocupa un puesto (0-3) con su color, su oro y sus torres.
+//  Cada jugador entra con su cuenta y ocupa un puesto (0-3) con su color, su oro, su mazo y sus torres.
 // ============================================================
-import { W, H, CELL, COLS, MAPS, PLAYER_COLORS, PLAYER_COLOR_NAMES, TOWERS, TOWER_KEYS, ENEMIES, CARDS, ABIL, skin, skipBonus, waveSummary } from './data.js';
+import { W, H, CELL, COLS, MAPS, PLAYER_COLORS, PLAYER_COLOR_NAMES, TOWERS, RARITY, ENEMIES, CARDS, ABIL, skin, skipBonus, waveSummary } from './data.js';
 import {
-  newGame, step, settle, applyAction, setRoster, pack, unpack, STEP, TARGET_MODES,
+  newGame, step, settle, applyAction, setRoster, setDeck, pack, unpack, STEP, TARGET_MODES,
   cellFree, underLimit, limitFor, towerAt, buildCost, upgradeCost, lockReason, sellValue, tStats, tRange,
 } from './sim.js';
 import { render, addFx, clearFx, drawTower, drawMapThumb } from './render.js';
 import { isConfigured } from './net.js';
 import * as account from './account.js';
+import * as prog from './meta.js';
+import * as homeUI from './home.js';
 
 const $ = (id) => document.getElementById(id);
 const now = () => performance.now() / 1000;
@@ -71,7 +73,29 @@ async function doAuth(mode) {
 }
 function afterLogin(acc) {
   me = acc; myName = acc.name;
+  prog.normalize(me.profile); // completa lo que falte (cuentas de antes de los cofres, datos a medias...)
+  homeUI.start();
   renderHome(); show('home');
+}
+homeUI.init({ profile: () => me?.profile, save: () => account.save({}) });
+
+// ---------- mazos: cómo viajan por la red ----------
+/** Mazo → texto corto para la sala: "firewall1,gc3,king1". */
+const deckStr = (deck) => deck.map(([k, l]) => k + l).join(',');
+function parseDeck(str) {
+  const out = [];
+  for (const part of String(str || '').split(',')) {
+    const m = /^([a-z]+)([1-5])$/.exec(part);
+    if (m && TOWERS[m[1]] && !out.some((x) => x[0] === m[1])) out.push([m[1], +m[2]]);
+  }
+  return out.slice(0, prog.DECK_SIZE);
+}
+const myDeckStr = () => deckStr(prog.activeDeck(me.profile));
+/** Mazos de los jugadores conectados, por puesto. */
+function decksBySlot() {
+  const out = {};
+  for (const q of Object.values(players)) { const d = parseDeck(q.dk); if (d.length && q.slot >= 0 && q.slot < 4) out[q.slot] = d; }
+  return out;
 }
 $('btnLogin').onclick = () => doAuth('login');
 $('btnRegister').onclick = () => doAuth('register');
@@ -90,6 +114,7 @@ $('homeNav').addEventListener('click', (e) => {
 });
 function renderHome() {
   if (!me) return;
+  homeUI.refresh();
   const st = me.profile.st, since = new Date(me.profile.created || Date.now()).toLocaleDateString('es-ES');
   $('homeName').textContent = me.name;
   $('homeSub').textContent = `${st.games} partidas · ${st.wins} victorias`;
@@ -103,19 +128,6 @@ function renderHome() {
   $('profileBox').innerHTML = `Nombre: <b>${esc(me.name)}</b><br>Cuenta creada el <b>${since}</b><br>Partidas: <b>${st.games}</b> · Victorias: <b>${st.wins}</b>`
     + (account.isLocal() ? '<br><span style="color:var(--amber)">Esta cuenta está guardada solo en este navegador.</span>' : '');
 }
-// Torres: las 8 con las que se empieza
-for (const k of TOWER_KEYS) {
-  const d = TOWERS[k], el = document.createElement('div');
-  el.className = 'tcard';
-  const ic = document.createElement('canvas'); ic.width = ic.height = 136;
-  const g = ic.getContext('2d'); g.scale(2, 2);
-  drawTower(g, k, 34, 33, null, 0.35, 0, false);
-  const txt = document.createElement('div');
-  txt.innerHTML = `<b style="color:${d.color}">${d.name}</b><span class="cost">${d.cost} de oro</span><small>${d.desc}</small>`;
-  el.append(ic, txt);
-  $('towerGrid').append(el);
-}
-
 // ---------- jugar: crear sala, unirse o práctica ----------
 if (!isConfigured() && !MOCK) {
   $('btnCreate').disabled = $('btnJoin').disabled = true;
@@ -142,17 +154,17 @@ async function enterRoom(fn) {
     $('menuMsg').textContent = err.message?.includes('sala') ? err.message : 'Error de conexión: ' + (err.message || err);
   }
 }
-$('btnCreate').onclick = () => enterRoom(() => net.create(myName, me.uid));
+$('btnCreate').onclick = () => enterRoom(() => net.create(myName, me.uid, myDeckStr()));
 $('btnJoin').onclick = () => {
   const code = $('inCode').value.trim().toUpperCase();
   if (!/^[A-Z]{4}$/.test(code)) { $('menuMsg').textContent = 'El código son 4 letras.'; return; }
-  enterRoom(() => net.join(code, myName, me.uid));
+  enterRoom(() => net.join(code, myName, me.uid, myDeckStr()));
 };
 $('inCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnJoin').click(); });
 $('btnSolo').onclick = () => {
   if (!me) return;
   solo = true; isHost = true;
-  players = { me: { name: myName, slot: 0 } }; slotNames[0] = myName;
+  players = { me: { name: myName, slot: 0, dk: myDeckStr() } }; slotNames[0] = myName;
   $('lobbyCode').textContent = $('hudCode').textContent = 'SOLO';
   updateLobby(); show('lobby');
 };
@@ -215,16 +227,44 @@ const mapBtns = MAPS.map((M, i) => {
 function sortedPlayers() {
   return Object.entries(players).sort((a, b) => (a[1].slot ?? 9) - (b[1].slot ?? 9));
 }
+let lobbySig = '';
 function updateLobby() {
   const list = sortedPlayers(), myId = net ? net.pid : 'me';
-  let html = '';
-  for (let i = 0; i < (solo ? 1 : 4); i++) {
-    const p = list[i];
-    html += p
-      ? `<li style="border-color:${PLAYER_COLORS[p[1].slot % 4]};color:${PLAYER_COLORS[p[1].slot % 4]}">${esc(p[1].name)}${p[0] === meta?.host ? ' ★' : ''}${p[0] === myId ? ' (tú)' : ''}<small> · ${PLAYER_COLOR_NAMES[p[1].slot % 4]}</small></li>`
-      : '<li class="empty">esperando…</li>';
+  const sig = JSON.stringify([list.map((p) => [p[0], p[1].name, p[1].slot, p[1].dk]), meta?.host, solo, me?.profile.deck, me?.profile.decks.map((d) => d.n + d.t.join())]);
+  if (sig !== lobbySig) {
+    lobbySig = sig;
+    const ul = $('lobbyPlayers');
+    ul.textContent = '';
+    for (let i = 0; i < (solo ? 1 : 4); i++) {
+      const p = list[i], li = document.createElement('li');
+      if (!p) { li.className = 'empty'; li.textContent = 'esperando…'; ul.append(li); continue; }
+      const col = PLAYER_COLORS[p[1].slot % 4];
+      li.style.borderColor = col;
+      li.innerHTML = `<span style="color:${col}">${esc(p[1].name)}${p[0] === meta?.host ? ' ★' : ''}${p[0] === myId ? ' (tú)' : ''}<small> · ${PLAYER_COLOR_NAMES[p[1].slot % 4]}</small></span>`;
+      li.append(homeUI.deckIcons(parseDeck(p[1].dk), 30));
+      ul.append(li);
+    }
+    // mi mazo: se puede cambiar aquí entre los que tengo guardados
+    const box = $('lobbyDeck');
+    box.textContent = '';
+    if (me) {
+      const lab = document.createElement('label'), sel = document.createElement('select');
+      lab.textContent = 'Tu mazo: ';
+      me.profile.decks.forEach((d, i) => {
+        const o = document.createElement('option');
+        o.value = i; o.textContent = `${d.n} (${d.t.length}/${prog.DECK_SIZE})`; o.disabled = !prog.deckPlayable(d.t); o.selected = i === me.profile.deck;
+        sel.append(o);
+      });
+      sel.onchange = () => {
+        me.profile.deck = +sel.value;
+        account.save({}).catch((err) => console.error(err));
+        if (solo) players.me.dk = myDeckStr(); else net?.setDeck(myDeckStr());
+        updateLobby();
+      };
+      lab.append(sel);
+      box.append(lab);
+    }
   }
-  $('lobbyPlayers').innerHTML = html;
   $('btnStart').classList.toggle('hidden', !isHost);
   mapBtns.forEach((b, i) => { b.classList.toggle('sel', i === selMap); b.disabled = !isHost; });
   $('lobbyMsg').textContent = solo ? 'Práctica en solitario: elige mapa y empieza.'
@@ -245,7 +285,7 @@ function updateChips() {
 $('btnStart').onclick = () => {
   if (!isHost) return;
   clearFx();
-  S = G = newGame(selMap, presentSlots()); dirty = true;
+  S = G = newGame(selMap, presentSlots(), decksBySlot()); dirty = true;
   if (solo) { startSim(); show('game'); } else net.setMeta({ started: true, map: selMap });
 };
 
@@ -311,7 +351,7 @@ function evalHost() {
 function becomeHost() {
   isHost = true;
   if (meta.started) {
-    if (!S) S = lastSnapStr ? unpack(lastSnapStr).S : newGame(selMap, presentSlots());
+    if (!S) S = lastSnapStr ? unpack(lastSnapStr).S : newGame(selMap, presentSlots(), decksBySlot());
     G = S; prevMap = null; dirty = true;
   }
   stopActions = net.onAction((a) => { if (S && applyAction(S, a)) { settle(S); dirty = true; } });
@@ -339,6 +379,9 @@ function syncRoster() {
     goneAt[x] ??= t;
     if (t - goneAt[x] < GRACE_MS) want.push(x); else delete goneAt[x];
   }
+  // el mazo de cada jugador se fija la primera vez que aparece en la partida (también si entra tarde)
+  const decks = decksBySlot();
+  for (const x of here) if (!S.dk[x] && decks[x] && setDeck(S, x, decks[x])) dirty = true;
   if (!setRoster(S, want)) return;
   dirty = true;
   for (const x of before) if (!S.act.includes(x)) S._fx.push(['t', 640, 220, `${slotName(x)} se ha ido: sus torres y su oro pasan a la manada`, PLAYER_COLORS[x], 4]);
@@ -426,21 +469,29 @@ function idleText() {
   return 'U/I/O mejorar rama · T objetivo · Q habilidad · X vender · M mover · F velocidad · Espacio saltar · H ayuda';
 }
 
-// ---------- tienda ----------
+// ---------- tienda: las torres de MI mazo ----------
 const shopBtns = {};
-for (const [i, k] of TOWER_KEYS.entries()) {
-  const d = TOWERS[k], b = document.createElement('button');
-  b.className = 'item';
-  const ic = document.createElement('canvas'); ic.width = ic.height = 112;
-  const g = ic.getContext('2d'); g.scale(1.68, 1.68);
-  drawTower(g, k, 34, 33, null, 0.35, 0, false);
-  const txt = document.createElement('div');
-  txt.innerHTML = `<b style="color:${d.color}">${d.name}</b><span class="cost"></span> <span class="key">[${i + 1}]</span>`;
-  b.append(ic, txt);
-  b.onclick = () => choose(k);
-  b.onmouseenter = () => info(`${d.name}: ${d.desc}`);
-  $('shop').append(b);
-  shopBtns[k] = { b, cost: txt.querySelector('.cost'), last: -1 };
+let shopKeys = [], shopSig = '';
+function buildShop() {
+  const dk = (G && G.dk && G.dk[mySlot()]) || prog.DEFAULT_DECK.map((k) => [k, 1]);
+  const sig = dk.map((x) => x.join('')).join();
+  if (sig === shopSig) return;
+  shopSig = sig; shopKeys = dk.map((x) => x[0]);
+  if (placing && !movingId && !shopKeys.includes(placing)) placing = null;
+  $('shop').textContent = '';
+  for (const k of Object.keys(shopBtns)) delete shopBtns[k];
+  dk.forEach(([k, lv], i) => {
+    const d = TOWERS[k], b = document.createElement('button');
+    b.className = `item r${d.rar} lv${lv}`;
+    b.style.setProperty('--rc', RARITY[d.rar].c);
+    const txt = document.createElement('div');
+    txt.innerHTML = `<b style="color:${d.color}">${d.name}</b>${lv > 1 ? `<span class="stars">${'★'.repeat(lv)}</span> ` : ''}<span class="cost"></span> <span class="key">[${i + 1}]</span>`;
+    b.append(homeUI.towerIcon(k, 56), txt);
+    b.onclick = () => choose(k);
+    b.onmouseenter = () => info(`${d.name} (${RARITY[d.rar].n}${lv > 1 ? `, nivel ${lv}: +${Math.round(prog.levelBonus(lv) * 1000) / 10}% de daño y alcance` : ''}): ${d.desc}`);
+    $('shop').append(b);
+    shopBtns[k] = { b, cost: txt.querySelector('.cost'), last: -1 };
+  });
 }
 function choose(k) {
   movingId = null; selId = null; selOb = -1;
@@ -586,7 +637,7 @@ addEventListener('keydown', (e) => {
   else if (k === 'p') act({ t: 'pause' });
   else if (!playing) return;
   else if (G.cd) { if (k >= '1' && k <= '3') act({ t: 'card', i: +k - 1 }); }
-  else if (k >= '1' && k <= '8') choose(TOWER_KEYS[+k - 1]);
+  else if (k >= '1' && k <= '8') { if (shopKeys[+k - 1]) choose(shopKeys[+k - 1]); }
   else if (k === ' ') { e.preventDefault(); act({ t: 'next' }); }
   else if (k === 'a') act({ t: 'auto' });
   else if (k === 'f') act({ t: 'speed' });
@@ -636,9 +687,10 @@ setInterval(() => {
 // ---------- panel de torre / obstáculo seleccionado ----------
 const r0 = (n) => Math.round(n * 10) / 10;
 function statLines(t, st) {
-  const L = [];
+  const L = [], ai = TOWERS[t.k].ai;
   if (st.dmg) L.push(`Daño ${Math.round(st.dmg)} cada ${r0(st.rate)}s${st.targets > 1 ? ` ×${st.targets}` : ''}`);
-  if (st.dps) L.push(`${Math.round(st.dps)} daño/s · atrapa ${r0(st.stun)}s cada ${st.cycle}s`);
+  if (st.dps && ai === 'beam') L.push(`Rayo de ${Math.round(st.dps)} daño/s que sube hasta x${1 + st.rampMax}`);
+  else if (st.dps) L.push(`${Math.round(st.dps)} daño/s · ${t.k === 'frost' ? 'congela' : 'atrapa'} ${r0(st.stun)}s cada ${st.cycle}s`);
   if (st.units) L.push(`${st.units} leonas · ${Math.round(st.uhp * G._m.thread)} vida · ${r0(st.udmg)} daño`);
   if (st.sdmg) L.push(`Lanza ${Math.round(st.sdmg)} cada ${r0(st.srate)}s`);
   if (st.buff) L.push(`Tambor +${Math.round(st.buff * 100)}% daño`);
@@ -647,15 +699,27 @@ function statLines(t, st) {
   if (st.burn) L.push(`Quema ${st.burn}/s`);
   if (st.income) L.push(`+${Math.round(st.income * G._m.tdm.backup)} de oro cada ${st.period}s`);
   if (st.heal) L.push(`+${st.heal} vidas/oleada`);
-  if (t.k !== 'backup') L.push(`Alcance ${Math.round(tRange(G, t))}`);
+  if (st.steal) L.push(`Roba ${st.steal} de oro cada ${r0(st.stealCd)}s mientras ataca`);
+  if (st.pctHp) L.push(`Quita un ${r0(st.pctHp * 100)}% de la vida máxima por golpe`);
+  if (st.stack) L.push(`Remates: ${t.kc || 0} → +${Math.round(Math.min(st.stackMax, (t.kc || 0) * st.stack) * 100)}% de daño (máx. +${Math.round(st.stackMax * 100)}%)`);
+  if (st.gbuff) L.push(`+${Math.round(st.gbuff * 100)}% de daño${st.grange ? ` y +${Math.round(st.grange * 100)}% de alcance` : ''} a TODAS las torres`);
+  if (st.gslow) L.push(`Ralentiza un ${Math.round(st.gslow * 100)}% a todos los barriles`);
+  if (st.revive) L.push((G.rvu >> t.o) & 1 ? 'Renacer: ya usado en esta partida' : `Renacer: salva la guarida con ${st.revive} vidas`);
+  if (st.range >= 2000) L.push('Alcance: todo el mapa');
+  else if (st.range) L.push(`Alcance ${Math.round(tRange(G, t))}`);
   const tags = [];
   if (st.detect || t._det || G._m.detect) tags.push('ve camuflados');
   if (st.pierce + (t._ap || 0) + G._m.pierce > 0 && t.k !== 'backup') tags.push(st.pierce >= 99 ? 'ignora blindaje' : `perfora ${st.pierce + (t._ap || 0) + G._m.pierce}`);
+  if (st.airM) tags.push(`x${st.airM} a voladores`);
+  if (st.knock) tags.push('empuja');
+  if (st.wound) tags.push('impide repararse');
+  if (t.lv > 1) tags.push(`nivel ${t.lv}: +${Math.round(prog.levelBonus(t.lv) * 1000) / 10}% daño y alcance`);
+  if (G._gb) tags.push(`Rey León +${Math.round(G._gb * 100)}%`);
   if (t._pad) tags.push('tótem +30%');
   if (t._b) tags.push(`tambor +${Math.round(t._b * 100)}%`);
   return L.join(' · ') + (tags.length ? `<br><span class="tags">${tags.join(' · ')}</span>` : '');
 }
-const canTarget = (t, st) => ['firewall', 'gc', 'debugger', 'balancer'].includes(t.k) || st.shoot;
+const canTarget = (t, st) => ['firewall', 'gc', 'sniper', 'chain', 'beam'].includes(TOWERS[t.k].ai) || st.shoot;
 
 function updatePanel() {
   const p = $('panel');
@@ -684,7 +748,7 @@ function updatePanel() {
     return { P, i, lock, u, cost, can: !lock && gold >= cost };
   });
   const abCd = Math.ceil(Math.max(0, t.ac));
-  const sig = [t.i, t.o, own, slotName(t.o), t.p.join(''), t.tg, t._disc, t._b, t._pad, G.md.length, rows.map((r) => r.can + r.lock).join(''), t.x > 16, t._rd < 0, abCd, t.at > 0].join();
+  const sig = [t.i, t.o, own, slotName(t.o), t.p.join(''), t.tg, t._disc, t._b, t._pad, G.md.length, t.kc, G.rvu, G._gb, rows.map((r) => r.can + r.lock).join(''), t.x > 16, t._rd < 0, abCd, t.at > 0].join();
   if (sig === panelSig) return;
   panelSig = sig;
   p.classList.remove('hidden');
@@ -695,14 +759,14 @@ function updatePanel() {
   if (!own) {
     // torre de un compañero: solo se puede mirar
     p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
-      <p class="sub">${d.name} ${tag}</p>
+      <p class="sub">${d.name} <span class="rar" style="color:${RARITY[d.rar].c}">${RARITY[d.rar].n}</span> ${tag}</p>
       <p style="color:var(--text)">${statLines(t, st)}</p>
       ${rows.map((r) => `<div class="path" style="--pc:${r.P.color}"><div class="ptop"><b>${r.i + 1}. ${r.P.name}</b><span class="pips">${[0, 1, 2, 3, 4].map((j) => `<i class="${j < t.p[r.i] ? 'on' : ''}"></i>`).join('')}</span></div></div>`).join('')}
       <p>Solo ${esc(slotName(t.o))} puede mejorarla, venderla o moverla.</p>`;
     return;
   }
   p.innerHTML = `<h3 style="color:${sk.main}">${esc(title)} <small>${t.p.join('-')}</small></h3>
-    <p class="sub">${d.name} ${tag}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
+    <p class="sub">${d.name} <span class="rar" style="color:${RARITY[d.rar].c}">${RARITY[d.rar].n}</span> ${tag}${t._disc ? ` · <span style="color:var(--lime)">−${Math.round(t._disc * 100)}% en mejoras</span>` : ''}</p>
     <p style="color:var(--text)">${statLines(t, st)}</p>
     ${t.k === 'thread' && t._rd < 0 ? '<p style="color:var(--pink)">¡Demasiado lejos del camino! Muévelo.</p>' : ''}
     ${st.ab ? `<button class="btn small abil ${abCd ? '' : 'ready'}" data-a="abil" ${abCd ? 'disabled' : ''}>⚡ ${ABIL[st.ab].n} [Q] ${abCd ? `· ${abCd}s` : '· LISTA'}</button><small class="abd">${ABIL[st.ab].d}</small>` : ''}
@@ -755,7 +819,8 @@ function updateHud() {
   $('btnAuto').classList.toggle('on', !!G.au);
   setTxt('btnSpeed', `Vel. x${G.sp} [F]`);
   $('btnSpeed').classList.toggle('on', G.sp > 1);
-  for (const k of TOWER_KEYS) {
+  buildShop();
+  for (const k of shopKeys) {
     const s = shopBtns[k], c = buildCost(G, k), full = !underLimit(G, k, slot);
     const label = full ? 'MÁX.' : c + ' oro';
     if (s.last !== label) { s.last = label; s.cost.textContent = label; }
@@ -797,6 +862,7 @@ function updateHud() {
     ov.className = 'overlay ' + (state || 'hidden');
     $('ovBtn2').classList.toggle('hidden', state === 'pause' || !isHost);
     $('ovScore').classList.toggle('hidden', state !== 'won' && state !== 'lost');
+    $('ovFil').classList.toggle('hidden', state !== 'won' && state !== 'lost');
     if (state === 'won' || state === 'lost') { $('ovScore').innerHTML = scoreTable(); recordResult(); }
     if (state === 'pause') { $('ovTitle').textContent = 'PAUSA'; $('ovSub').textContent = `Pausado por ${G.pb || '?'} — cualquiera puede reanudar`; $('ovBtn').textContent = 'Reanudar'; }
     if (state === 'won') { $('ovTitle').textContent = '¡VICTORIA!'; $('ovSub').textContent = `La manada ha defendido ${M.name} durante ${M.waves} oleadas y le quedan ${G.life} vidas. ¡Buen trabajo!`; $('ovBtn').textContent = 'Jugar otra vez'; }
@@ -813,17 +879,19 @@ function scoreTable() {
 /** Guarda el resultado en mi cuenta (una sola vez por partida). */
 let savedGid = '';
 function recordResult() {
-  const x = mySlot();
+  const x = mySlot(), won = G.ph === 'won', gain = prog.reward(G.map, G.w, won);
+  $('ovFil').innerHTML = !me || !G.act.includes(x) ? '' : gain ? `<i class="steak"></i> +${gain} filetes${won ? '' : ' (ganando te llevas más)'}` : 'Aguanta al menos una oleada para ganar filetes.';
   if (!me || !G.gid || savedGid === G.gid || !G.act.includes(x)) return;
   savedGid = G.gid;
   if (me.profile.lastGid === G.gid) return; // ya estaba guardada (por ejemplo, tras recargar la página)
-  const st = me.profile.st, won = G.ph === 'won';
+  const st = me.profile.st;
+  me.profile.inv.fil += gain;
   const next = {
     ...st, games: st.games + 1, wins: st.wins + (won ? 1 : 0), kills: st.kills + G.kills, dmg: st.dmg + G.st[x][0], gold: st.gold + G.st[x][1],
     best: { ...st.best, [G.map]: Math.max(st.best?.[G.map] || 0, G.w) },
     mapWins: { ...st.mapWins, [G.map]: (st.mapWins?.[G.map] || 0) + (won ? 1 : 0) },
   };
-  account.save({ st: next, lastGid: G.gid }).then(renderHome).catch((err) => { console.error(err); info('No se ha podido guardar el resultado en tu cuenta.', true); });
+  account.save({ st: next, lastGid: G.gid, inv: me.profile.inv }).then(renderHome).catch((err) => { console.error(err); info('No se ha podido guardar el resultado en tu cuenta.', true); });
 }
 
 // ---------- bucle de dibujo ----------
@@ -855,4 +923,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 // acceso para pruebas automáticas
-window.__cd = { get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, get me() { return me; }, get slot() { return mySlot(); }, act };
+window.__cd = { prog, get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, get me() { return me; }, get slot() { return mySlot(); }, act };

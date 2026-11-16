@@ -50,16 +50,16 @@ export async function connect() {
   const api = {
     pid,
     get code() { return code; },
-    async create(name, uid) {
+    async create(name, uid, dk) {
       code = 'TEST';
       Object.keys(localStorage).filter((k) => k.startsWith('cdmock:')).forEach((k) => localStorage.removeItem(k));
       seed();
       put('meta', '', { host: pid, started: false });
       put('seats', uid, 0);
-      put('players', pid, { name, slot: 0, uid, at: Date.now() });
+      put('players', pid, { name, slot: 0, uid, dk: dk || '', at: Date.now() });
       return code;
     },
-    async join(c, name, uid) {
+    async join(c, name, uid, dk) {
       code = c; seed();
       if (!cache.meta) { code = ''; throw new Error('No existe ninguna sala con ese código.'); }
       const used = Object.values(cache.players || {}).filter((p) => p.uid !== uid).map((p) => p.slot);
@@ -67,7 +67,7 @@ export async function connect() {
       if (!next) { code = ''; throw new Error('La sala está llena (máximo 4 jugadores).'); }
       for (const u of Object.keys(cache.seats || {})) if (next[u] === undefined) put('seats', u, null);
       put('seats', uid, next[uid]);
-      put('players', pid, { name, slot: next[uid], uid, at: Date.now() });
+      put('players', pid, { name, slot: next[uid], uid, dk: dk || '', at: Date.now() });
       return code;
     },
     on(kind, cb) { subs.push({ kind, cb }); cb(cache[kind] ?? null); },
@@ -77,6 +77,7 @@ export async function connect() {
     onChat(cb) { chatCbs.push(cb); },
     publish(str) { put('s', '', str); },
     cursor(c) { put('c', pid, c); },
+    async setDeck(dk) { const me = (cache.players || {})[pid]; if (me) put('players', pid, { ...me, dk }); },
     async setMeta(m) { put('meta', '', { ...(cache.meta || {}), ...m }); },
     async claimHost(old) { const m = cache.meta; if (m.host === old) put('meta', '', { ...m, host: pid }); },
     leave() {

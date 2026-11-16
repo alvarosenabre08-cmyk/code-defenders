@@ -32,7 +32,10 @@
 <section id="home" class="screen home hidden">
   <header class="home-top">
     <h1 class="logo small">LEONES <span>TD</span></h1>
-    <div class="who"><b id="homeName"></b><small id="homeSub"></small></div>
+    <div class="top-right">
+      <div class="filbox" title="Filetes: se ganan al acabar cada partida y sirven para comprar cofres"><i class="steak"></i><b id="homeFil">0</b></div>
+      <div class="who"><b id="homeName"></b><small id="homeSub"></small></div>
+    </div>
   </header>
   <div class="home-body">
     <nav id="homeNav" class="home-nav">
@@ -72,17 +75,43 @@
         <p class="note">Cada jugador tiene su propio oro y sus propias torres (con su color). El oro de cada barril se reparte según el daño que le haga cada uno.</p>
       </div>
       <div class="tab hidden" id="tab-torres">
-        <h2>Torres</h2>
+        <h2>Torres <small id="towerCount"></small></h2>
+        <p class="note">Empiezas con 8 torres; el resto sale en los cofres. Las repetidas suben la torre de nivel (hasta el 5). Haz clic en una torre para ver sus 3 ramas.</p>
         <div id="towerGrid" class="tower-grid"></div>
-        <p class="soon">Próximamente: torres nuevas por calidades (Común, Rara, Épica y Legendaria), niveles y copias.</p>
       </div>
       <div class="tab hidden" id="tab-bolsa">
         <h2>Bolsa</h2>
-        <p class="soon">Próximamente: tus filetes, los cofres sin abrir y el historial de cofres abiertos.</p>
+        <div class="bag-top">
+          <div class="bag-box"><i class="steak big"></i><b id="bagFil">0</b><small>Filetes</small></div>
+          <div class="bag-box"><canvas id="bagChestIc" width="128" height="104"></canvas><b id="bagChests">0</b><small>Cofres sin abrir</small></div>
+          <div class="bag-actions">
+            <button id="btnBuyChest" class="btn primary">Comprar cofre · 100 <i class="steak"></i></button>
+            <button id="btnOpenChest" class="btn">Abrir un cofre</button>
+            <small id="bagPity"></small>
+            <p id="bagMsg" class="msg"></p>
+          </div>
+        </div>
+        <h3>Qué puede salir en un cofre</h3>
+        <div id="bagOdds" class="odds"></div>
+        <p class="note">Cada cofre trae 1 torre. Si ya la tienes, es una copia: con 1, 2, 4 y 8 copias la torre sube a los niveles 2, 3, 4 y 5 (+2,5% de daño y alcance por nivel, hasta +10%). Las copias de una torre al nivel 5 se cambian por filetes.</p>
+        <h3>Copias de tus torres</h3>
+        <div id="bagCopies" class="copies"></div>
+        <h3>Últimos cofres abiertos</h3>
+        <div id="bagHist" class="hist"></div>
       </div>
       <div class="tab hidden" id="tab-mazos">
         <h2>Mazos</h2>
-        <p class="soon">Próximamente: elige las 6 torres con las que entras a cada partida y guarda varios mazos.</p>
+        <p class="note">A cada partida entras con un mazo de hasta 6 torres: solo podrás construir esas. Puedes guardar varios mazos y elegir cuál usar aquí o en la sala.</p>
+        <div id="deckTabs" class="deck-tabs"></div>
+        <div class="deck-head">
+          <input id="deckName" class="plain" maxlength="16" placeholder="Nombre del mazo" autocomplete="off">
+          <button id="btnDeckUse" class="btn small">Usar este mazo</button>
+          <button id="btnDeckDel" class="btn small danger">Borrar mazo</button>
+        </div>
+        <div id="deckSlots" class="deck-slots"></div>
+        <p id="deckMsg" class="msg"></p>
+        <h3>Tu colección <small>(clic para meter o sacar del mazo)</small></h3>
+        <div id="deckPool" class="deck-pool"></div>
       </div>
       <div class="tab hidden" id="tab-misiones">
         <h2>Misiones</h2>
@@ -111,6 +140,7 @@
   <p class="tag">Código de la sala: pásaselo a tu manada</p>
   <h1 id="lobbyCode" class="code">----</h1>
   <ul id="lobbyPlayers" class="players"></ul>
+  <div id="lobbyDeck" class="lobby-deck"></div>
   <div id="mapSel" class="maps"></div>
   <button id="btnStart" class="btn primary">¡A defender la guarida!</button>
   <p id="lobbyMsg" class="msg"></p>
@@ -146,7 +176,7 @@
         <div>
           <h3>Teclas</h3>
           <table>
-            <tr><td><kbd>1</kbd>-<kbd>8</kbd></td><td>Elegir torre</td></tr>
+            <tr><td><kbd>1</kbd>-<kbd>6</kbd></td><td>Elegir torre de tu mazo</td></tr>
             <tr><td><kbd>Mayús</kbd>+<kbd>Clic</kbd></td><td>Construir varias seguidas</td></tr>
             <tr><td><kbd>U</kbd> <kbd>I</kbd> <kbd>O</kbd></td><td>Mejorar rama 1 / 2 / 3</td></tr>
             <tr><td><kbd>T</kbd></td><td>Cambiar a quién ataca</td></tr>
@@ -173,7 +203,7 @@
           <p><b style="color:#a8d06a">Camuflado</b>: solo lo ven torres con detección (León Cazador, rama 2).<br>
           <b style="color:#c9d1d9">De hierro (blindado)</b>: frena los golpes débiles; usa explosiones, ácido, fuego o perforantes.<br>
           <b style="color:#ffb066">Volador</b>: va recto a la guarida; ignora leonas, brea y trampas.<br>
-          <b style="color:#a9e06a">Musgoso</b>: se repara solo salvo que arda.<br>
+          <b style="color:#a9e06a">Musgoso</b>: se repara solo salvo que arda (o le peguen Escarcha, Verdugo o León del Tiempo).<br>
           <b style="color:#d9c9f7">Fantasma</b>: las leonas no pueden frenarlo.</p>
           <h3>Combos</h3>
           <p><b style="color:#5ae0f0">Descarga</b>: León Cañonero (moja) + León Chamán (rayo) = +60% de daño y aturde.<br>
@@ -190,6 +220,7 @@
       <h2 id="ovTitle"></h2>
       <p id="ovSub"></p>
       <table id="ovScore" class="score hidden"></table>
+      <p id="ovFil" class="fil-gain hidden"></p>
       <button id="ovBtn" class="btn primary"></button>
       <button id="ovBtn2" class="btn">Elegir otro mapa</button>
     </div>
@@ -205,6 +236,17 @@
 <div id="chat" class="chat hidden">
   <div id="chatLog" class="chat-log"></div>
   <input id="chatIn" maxlength="120" placeholder="Escribe y pulsa Enter (Esc cierra)" autocomplete="off">
+</div>
+
+<!-- ============ VENTANAS: torre y cofre ============ -->
+<div id="towerModal" class="modal hidden"><div class="modal-box" id="towerDetail"></div></div>
+<div id="chestModal" class="modal hidden">
+  <div class="modal-box chest-box">
+    <canvas id="chestCv" width="460" height="340"></canvas>
+    <h3 id="chestTitle"></h3>
+    <p id="chestText"></p>
+    <div class="modal-btns"><button id="btnChestAgain" class="btn primary">Abrir otro</button><button id="btnChestClose" class="btn ghost">Cerrar</button></div>
+  </div>
 </div>
 
 <script type="module" src="js/main.js"></script>
