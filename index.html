@@ -51,6 +51,11 @@
     <div class="home-main">
       <div class="tab" id="tab-jugar">
         <h2>Jugar</h2>
+        <div id="rejoinBox" class="rejoin hidden">
+          <div><b>Tienes una partida a medias</b><small id="rejoinTxt"></small></div>
+          <button id="btnRejoin" class="btn primary">Volver a la partida</button>
+          <button id="btnRejoinNo" class="btn small ghost">Olvidar</button>
+        </div>
         <div class="play-grid">
           <div class="play-card">
             <h3>Crear sala</h3>
@@ -115,19 +120,33 @@
       </div>
       <div class="tab hidden" id="tab-misiones">
         <h2>Misiones</h2>
-        <p class="soon">Próximamente: misiones diarias y semanales que dan filetes.</p>
+        <p class="note">Iguales para toda la clase. Se cumplen jugando (también en práctica) y al completarlas reclamas los filetes.</p>
+        <h3>Diarias <small id="msDayLeft"></small></h3>
+        <div id="msDaily" class="missions"></div>
+        <h3>Semanales <small id="msWeekLeft"></small></h3>
+        <div id="msWeekly" class="missions"></div>
+        <p id="msMsg" class="msg"></p>
       </div>
       <div class="tab hidden" id="tab-logros">
-        <h2>Logros</h2>
-        <p class="soon">Próximamente: logros permanentes con insignias.</p>
+        <h2>Logros <small id="achCount"></small></h2>
+        <p class="note">Cada logro da filetes una vez y una insignia que puedes lucir en tu Perfil (se ve junto a tu nombre en la sala).</p>
+        <div id="achGrid" class="ach-grid"></div>
       </div>
       <div class="tab hidden" id="tab-estadisticas">
         <h2>Estadísticas</h2>
         <div id="statGrid" class="stat-grid"></div>
-        <p class="soon">Próximamente: más detalle (torre más usada, cofres abiertos…).</p>
+        <h3>Por mapa</h3>
+        <table id="statMaps" class="score maps"></table>
+        <h3>Torres que más construyes</h3>
+        <div id="statTowers" class="bars"></div>
       </div>
       <div class="tab hidden" id="tab-perfil">
         <h2>Perfil</h2>
+        <div class="profile-card" id="profileCard"></div>
+        <h3>Insignia <small>(elige una de tus insignias de logros)</small></h3>
+        <div id="badgePick" class="badge-pick"></div>
+        <h3>Torre favorita</h3>
+        <div id="favPick" class="deck-pool"></div>
         <div id="profileBox" class="profile"></div>
         <button id="btnLogout" class="btn danger">Cerrar sesión</button>
       </div>
@@ -162,15 +181,21 @@
     <button id="btnSpeed" class="btn small" title="Cambia la velocidad del juego para todos: x1, x2, x4, x6">Vel. x1 [F]</button>
     <button id="btnAuto" class="btn small" title="Las oleadas salen seguidas, sin esperar">Auto [A]: OFF</button>
     <button id="btnNext" class="btn small" title="Empieza ya la siguiente oleada y cobra oro por los segundos saltados">Saltar [Esp] <span id="hudNext"></span></button>
+    <button id="btnGift" class="btn small ghost" title="Enviar oro a un compañero">Donar [G]</button>
+    <button id="btnStats" class="btn small ghost" title="Estadísticas de la partida">Stats [E]</button>
     <button id="btnChat" class="btn small ghost">Chat</button>
-    <button id="btnKeys" class="btn small ghost">Ayuda [H]</button>
+    <button id="btnKeys" class="btn small ghost">Ayuda</button>
     <button id="btnPause" class="btn small">Pausa [P]</button>
+    <button id="btnExit" class="btn small danger" title="Salir de la partida y volver al menú">Salir</button>
   </header>
 
   <div class="stage" id="stage">
     <canvas id="cv" width="1280" height="640"></canvas>
     <div id="panel" class="panel hidden"></div>
     <div id="abil" class="abilbar"></div>
+    <div id="reto" class="reto hidden"></div>
+    <div id="gift" class="gift hidden"></div>
+    <div id="statsPanel" class="stats-panel hidden"><h3>Estadísticas de la partida <small>[E] para cerrar</small></h3><table id="statsTable" class="score wide"></table><p id="statsRetos"></p></div>
     <div id="keys" class="keys hidden">
       <div class="cols">
         <div>
@@ -189,6 +214,10 @@
             <tr><td><kbd>F</kbd></td><td>Velocidad x1 → x2 → x4 → x6</td></tr>
             <tr><td><kbd>P</kbd></td><td>Pausa para todos</td></tr>
             <tr><td><kbd>Enter</kbd></td><td>Chat</td></tr>
+            <tr><td><kbd>B</kbd> / <kbd>Clic central</kbd></td><td>Marcador: "construid aquí" o "atacad este barril"</td></tr>
+            <tr><td><kbd>V</kbd></td><td>Marcador "¡ayuda!"</td></tr>
+            <tr><td><kbd>G</kbd></td><td>Donar oro a un compañero</td></tr>
+            <tr><td><kbd>E</kbd></td><td>Estadísticas de la partida</td></tr>
             <tr><td><kbd>Esc</kbd></td><td>Cancelar</td></tr>
           </table>
           <p>Las teclas de torre actúan sobre la seleccionada o sobre la que tengas bajo el ratón. Solo puedes mejorar, vender o mover TUS torres (las del aro de tu color).</p>
@@ -219,10 +248,13 @@
     <div id="overlay" class="overlay hidden">
       <h2 id="ovTitle"></h2>
       <p id="ovSub"></p>
-      <table id="ovScore" class="score hidden"></table>
+      <table id="ovScore" class="score wide hidden"></table>
+      <p id="ovRetos" class="ov-retos hidden"></p>
       <p id="ovFil" class="fil-gain hidden"></p>
+      <div id="ovGoals" class="ov-goals hidden"></div>
       <button id="ovBtn" class="btn primary"></button>
       <button id="ovBtn2" class="btn">Elegir otro mapa</button>
+      <button id="ovExit" class="btn ghost">Salir al menú</button>
     </div>
   </div>
 
@@ -236,6 +268,17 @@
 <div id="chat" class="chat hidden">
   <div id="chatLog" class="chat-log"></div>
   <input id="chatIn" maxlength="120" placeholder="Escribe y pulsa Enter (Esc cierra)" autocomplete="off">
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<!-- ============ CONFIRMAR SALIDA ============ -->
+<div id="exitModal" class="modal hidden">
+  <div class="modal-box exit-box">
+    <h3>¿Salir al menú?</h3>
+    <p id="exitText"></p>
+    <div class="modal-btns"><button id="btnExitYes" class="btn danger">Salir al menú</button><button id="btnExitNo" class="btn primary">Seguir jugando</button></div>
+  </div>
 </div>
 
 <!-- ============ VENTANAS: torre y cofre ============ -->

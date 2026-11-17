@@ -3,7 +3,7 @@
 //  Todo se pinta por código (sin imágenes): los leones y barriles se
 //  dibujan una vez en un lienzo oculto ("sprite") y luego se reutilizan.
 // ============================================================
-import { W, H, CELL, COLS, ROWS, MAPS, TOWERS, ENEMIES, ENEMY_KEYS, PLAYER_COLORS, pathPos, stats, skin } from './data.js';
+import { W, H, CELL, COLS, ROWS, MAPS, TOWERS, ENEMIES, ENEMY_KEYS, PLAYER_COLORS, RARITY, pathPos, stats, skin } from './data.js';
 import { tStats, tRange, soldierD, epos } from './sim.js';
 
 const TAU = Math.PI * 2;
@@ -136,19 +136,12 @@ function lionBody(c, o) {
   c.strokeStyle = INK; c.lineWidth = 6; c.stroke(); c.strokeStyle = o.fur || FUR; c.lineWidth = 3; c.stroke();
   c.beginPath(); c.arc(-28, -8, 4, 0, TAU); ink(c, o.mane || MANE, 1.6);
   c.beginPath(); c.ellipse(-9, 0, 11.5, 9.5, 0, 0, TAU); ink(c, o.fur || FUR, 2.2);
-  if (o.tier >= 2) {
-    c.save(); c.beginPath(); c.ellipse(-9, 0, 11.5, 9.5, 0, 0, TAU); c.clip();
-    c.fillStyle = o.acc; c.fillRect(-18.5, -10, 8, 20);
-    c.fillStyle = 'rgba(255,255,255,0.35)'; c.fillRect(-18.5, -10, 8, 4);
-    c.restore();
-    c.beginPath(); c.ellipse(-9, 0, 11.5, 9.5, 0, 0, TAU); c.lineWidth = 2.2; c.strokeStyle = INK; c.stroke();
-  }
+  decoBody(c, o);
 }
 /** Patas delanteras (y hombreras a partir de Tier 4). */
 function paws(c, o, fx = 9, fy = 9.5) {
   for (const s of [-1, 1]) {
     c.beginPath(); c.ellipse(fx, s * fy, 5, 3.6, s * 0.45, 0, TAU); ink(c, o.fur || FUR, 2);
-    if (o.tier >= 4) { c.beginPath(); c.arc(-9, s * 9.5, 4.6, 0, TAU); ink(c, o.acc, 1.8); c.beginPath(); c.arc(-10, s * 10.3, 1.4, 0, TAU); c.fillStyle = 'rgba(255,255,255,0.6)'; c.fill(); }
   }
 }
 /** Cabeza con melena. Cinta en Tier 3+, corona en Tier 5. */
@@ -165,21 +158,133 @@ function lionHead(c, o) {
     c.beginPath(); c.arc(-3.5, s * 7.8, 1.5, 0, TAU); c.fillStyle = '#e88a7a'; c.fill();
   }
   c.beginPath(); c.arc(1.5, 0, 8.4, 0, TAU); ink(c, o.fur || FUR, 2);
-  if (o.tier >= 3) {
-    c.save(); c.beginPath(); c.arc(1.5, 0, 8.4, 0, TAU); c.clip();
-    c.fillStyle = o.acc; c.fillRect(-4, -10, 3.8, 20); c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(-4, -10, 1, 20);
-    c.restore(); c.beginPath(); c.arc(1.5, 0, 8.4, 0, TAU); c.lineWidth = 2; c.strokeStyle = INK; c.stroke();
-  }
   c.beginPath(); c.ellipse(6.4, 0, 4.2, 5, 0, 0, TAU); c.fillStyle = MUZZLE; c.fill();
   c.beginPath(); c.ellipse(9.4, 0, 2.1, 2.8, 0, 0, TAU); c.fillStyle = '#5a2d1a'; c.fill();
   for (const s of [-1, 1]) {
     c.beginPath(); c.ellipse(3.4, s * 4.1, 1.9, 2.3, 0, 0, TAU); c.fillStyle = '#2a1608'; c.fill();
     c.beginPath(); c.arc(4, s * 4.1 - 0.7, 0.7, 0, TAU); c.fillStyle = '#fff'; c.fill();
   }
-  if (o.tier >= 5) {
-    star(c, -3, 0, 6.5, 3.6, 5, Math.PI); ink(c, '#ffd23f', 1.6);
-    c.beginPath(); c.arc(-3, 0, 1.8, 0, TAU); c.fillStyle = '#e8344a'; c.fill();
+  decoHead(c, o);
+}
+
+// ============================================================
+//  EQUIPO DE LAS MEJORAS
+//  Cada rama viste al león de una forma distinta (sirve para las 20 torres):
+//    rama 1 · FUERZA   → collar, hombreras, armadura y casco; oro y cuernos al nivel 5
+//    rama 2 · MÍSTICA  → cinta con pluma, bufanda, capa y gema; runas y corona al nivel 5
+//    rama 3 · RAPIDEZ  → gafas, rayos pintados, alas y propulsores; doble ala al nivel 5
+//  Los cambios grandes llegan en los niveles 3 y 5, y cada nivel añade algo.
+//  La rama secundaria (máx. 2) también deja ver sus primeras piezas.
+// ============================================================
+const lv = (o, i) => (o.p ? o.p[i] : 0);
+const STEEL = '#c3ccd6', GOLD = '#ffd23f';
+/** Detrás del león: alas, bufanda, orbes, aura y runas (se dibuja antes que la torre). */
+function decoUnder(c, o) {
+  const [f, m, r] = [lv(o, 0), lv(o, 1), lv(o, 2)], pc = o.pc;
+  if (f >= 5) { // aura de fuego en estrella
+    c.beginPath(); for (let i = 0; i < 24; i++) { const a = (i / 24) * TAU, R = i % 2 ? 20 : 27; c.lineTo(-6 + Math.cos(a) * R, Math.sin(a) * R); } c.closePath();
+    c.fillStyle = 'rgba(255,140,50,0.45)'; c.fill(); c.lineWidth = 1.6; c.strokeStyle = 'rgba(160,40,10,0.6)'; c.stroke();
   }
+  if (m >= 5) { // círculo de runas
+    c.beginPath(); c.arc(-4, 0, 25, 0, TAU); c.fillStyle = 'rgba(255,255,255,0.14)'; c.fill(); c.lineWidth = 2.4; c.strokeStyle = pc[1]; c.stroke();
+    c.beginPath(); c.arc(-4, 0, 21, 0, TAU); c.lineWidth = 1; c.stroke();
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; c.save(); c.translate(-4 + Math.cos(a) * 23, Math.sin(a) * 23); c.rotate(a); c.fillStyle = '#fff'; c.fillRect(-1, -2.2, 2, 4.4); c.restore(); }
+  }
+  if (r >= 3) { // alas (2 pares al nivel 5)
+    const pairs = r >= 5 ? [[-2, 1.15], [-12, 0.85]] : [[-4, r >= 4 ? 1.1 : 0.9]];
+    for (const [x0, k] of pairs) for (const sd of [-1, 1]) {
+      c.save(); c.translate(x0, sd * 8); c.scale(k, sd * k);
+      for (let j = 2; j >= 0; j--) {
+        c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(-6 - j * 3, 10 + j * 2, -14 - j * 5, 18 - j * 1.5); c.quadraticCurveTo(-9 - j * 3, 7, 0, 0);
+        ink(c, j === 0 ? '#ffffff' : j === 1 ? pc[2] : shade(pc[2], -0.25), 1.6);
+      }
+      c.restore();
+    }
+  }
+  if (m >= 2) { // bufanda al viento (capa a partir del nivel 3: se dibuja sobre el cuerpo)
+    for (const sd of [-1, 1]) {
+      c.beginPath(); c.moveTo(-3, sd * 3); c.bezierCurveTo(-12, sd * 2, -16, sd * 12, -26, sd * 9); c.lineTo(-25, sd * 5.5); c.bezierCurveTo(-16, sd * 8, -12, sd * -1, -3, sd * -1); c.closePath();
+      ink(c, pc[1], 1.5);
+    }
+  }
+  if (m >= 4) for (const sd of [-1, 1]) { // orbes mágicos a los lados
+    c.beginPath(); c.arc(4, sd * 21, 6, 0, TAU); c.fillStyle = 'rgba(255,255,255,0.35)'; c.fill();
+    c.beginPath(); c.arc(4, sd * 21, 3.8, 0, TAU); ink(c, pc[1], 1.5);
+    c.beginPath(); c.arc(3, sd * 21 - 1.2, 1.2, 0, TAU); c.fillStyle = '#fff'; c.fill();
+  }
+}
+/** Sobre el lomo (se llama al final de lionBody). */
+function decoBody(c, o) {
+  const [f, m, r] = [lv(o, 0), lv(o, 1), lv(o, 2)], pc = o.pc;
+  if (!pc) return;
+  if (r >= 2 && m < 3 && f < 3) { // rayos pintados en el pelaje
+    c.save(); c.beginPath(); c.ellipse(-9, 0, 11.5, 9.5, 0, 0, TAU); c.clip();
+    for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(-19, sd * 5); c.lineTo(-13, sd * 2); c.lineTo(-11, sd * 6); c.lineTo(-3, sd * 3); c.lineWidth = 2.6; c.strokeStyle = pc[2]; c.stroke(); }
+    c.restore();
+  }
+  if (f >= 3) { // armadura de placas (oro al nivel 5)
+    const metal = f >= 5 ? GOLD : STEEL;
+    for (const x of [-17, -11.5, -6]) {
+      c.beginPath(); c.roundRect(x - 3, -9.5, 6.5, 19, 2.5); ink(c, metal, 1.7);
+      c.fillStyle = 'rgba(255,255,255,0.4)'; c.fillRect(x - 2, -8.5, 1.6, 17);
+      c.fillStyle = pc[0]; c.fillRect(x + 2, -8, 1.3, 16);
+    }
+    if (f >= 4) for (const x of [-17, -11.5, -6]) { c.beginPath(); c.moveTo(x - 2, 0); c.lineTo(x + 0.5, -4); c.lineTo(x + 3, 0); c.lineTo(x + 0.5, 4); c.closePath(); ink(c, f >= 5 ? '#fff6c2' : '#f2f5f8', 1.2); }
+  } else if (m >= 3) { // capa
+    c.beginPath(); c.moveTo(-1, -10.5); c.quadraticCurveTo(-14, -15, -24, -13); c.quadraticCurveTo(-28, 0, -24, 13); c.quadraticCurveTo(-14, 15, -1, 10.5); c.quadraticCurveTo(-4, 0, -1, -10.5);
+    ink(c, pc[1], 2);
+    c.beginPath(); c.moveTo(-24, -13); c.quadraticCurveTo(-28, 0, -24, 13); c.lineWidth = 2.6; c.strokeStyle = m >= 4 ? GOLD : '#fff5e0'; c.stroke();
+    c.fillStyle = 'rgba(0,0,0,0.18)'; c.beginPath(); c.moveTo(-6, -9); c.quadraticCurveTo(-14, 0, -6, 9); c.quadraticCurveTo(-10, 0, -6, -9); c.fill();
+    if (m >= 4) { c.beginPath(); c.arc(-13, 0, 4.2, 0, TAU); ink(c, GOLD, 1.5); star(c, -13, 0, 2.8, 1.2, 4, 0); c.fillStyle = pc[1]; c.fill(); }
+    if (m >= 5) for (const [x, y] of [[-19, -7], [-19, 7], [-8, -6], [-8, 6]]) { star(c, x, y, 2.4, 1, 4, 0.4); c.fillStyle = '#fff6c2'; c.fill(); }
+  }
+  if (f >= 2) for (const sd of [-1, 1]) { // hombreras
+    c.beginPath(); c.ellipse(-3, sd * 9.5, 5.6, 4.6, 0, 0, TAU); ink(c, f >= 5 ? GOLD : STEEL, 1.8);
+    c.beginPath(); c.ellipse(-3, sd * 9.5, 5.6, 4.6, 0, sd > 0 ? 0 : Math.PI, sd > 0 ? Math.PI : TAU); c.lineWidth = 1.6; c.strokeStyle = pc[0]; c.stroke();
+    if (f >= 4) { c.beginPath(); c.moveTo(-6, sd * 12); c.lineTo(-4, sd * 19); c.lineTo(-1, sd * 12); c.closePath(); ink(c, '#f2f5f8', 1.3); }
+  }
+  if (f >= 1) { // collar con tachuelas
+    c.beginPath(); c.roundRect(-4.5, -9.5, 4.2, 19, 2); ink(c, pc[0], 1.6);
+    c.fillStyle = f >= 5 ? '#fff6c2' : '#e6ecf2'; for (const y of [-6, 0, 6]) { c.beginPath(); c.arc(-2.4, y, 1.1, 0, TAU); c.fill(); }
+  }
+  if (r >= 4) for (const sd of [-1, 1]) { // propulsores
+    c.beginPath(); c.roundRect(-25, sd * 5 - 2.6, 8, 5.2, 2); ink(c, STEEL, 1.5);
+    c.beginPath(); c.moveTo(-25, sd * 5 - 2); c.lineTo(-32 - (r >= 5 ? 4 : 0), sd * 5); c.lineTo(-25, sd * 5 + 2); c.closePath(); c.fillStyle = '#ffb52a'; c.fill();
+    c.beginPath(); c.moveTo(-25, sd * 5 - 1); c.lineTo(-29, sd * 5); c.lineTo(-25, sd * 5 + 1); c.closePath(); c.fillStyle = '#fff6c2'; c.fill();
+  }
+}
+/** Sobre la cabeza (se llama al final de lionHead). */
+function decoHead(c, o) {
+  const [f, m, r] = [lv(o, 0), lv(o, 1), lv(o, 2)], pc = o.pc;
+  if (!pc) return;
+  if (f >= 3) { // casco
+    const metal = f >= 5 ? GOLD : STEEL;
+    if (f >= 5) for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(-1, sd * 6); c.quadraticCurveTo(-3, sd * 16, -12, sd * 15); c.quadraticCurveTo(-5, sd * 11, -4, sd * 5); c.closePath(); ink(c, '#fff5e0', 1.6); }
+    c.beginPath(); c.arc(1.5, 0, 9, Math.PI * 0.55, Math.PI * 1.45); c.closePath(); ink(c, metal, 1.9);
+    c.fillStyle = 'rgba(255,255,255,0.45)'; c.beginPath(); c.ellipse(-3.5, -3, 2.2, 3, 0, 0, TAU); c.fill();
+    if (f >= 4) { c.beginPath(); c.moveTo(1, -1.6); c.quadraticCurveTo(-10, -3, -16, 0); c.quadraticCurveTo(-10, 3, 1, 1.6); c.closePath(); ink(c, pc[0], 1.5); } // penacho
+    else { c.fillStyle = pc[0]; c.fillRect(-6.5, -1.4, 7, 2.8); c.lineWidth = 1; c.strokeStyle = INK; c.strokeRect(-6.5, -1.4, 7, 2.8); }
+  }
+  if (m >= 1 && f < 3) { // cinta en la frente con pluma (corona de gemas al nivel 5)
+    c.save(); c.beginPath(); c.arc(1.5, 0, 8.4, 0, TAU); c.clip();
+    c.fillStyle = pc[1]; c.fillRect(-3.4, -10, 3.4, 20); c.restore();
+    c.beginPath(); c.arc(1.5, 0, 8.4, 0, TAU); c.lineWidth = 2; c.strokeStyle = INK; c.stroke();
+    if (m < 5) { c.beginPath(); c.moveTo(-2, 6); c.quadraticCurveTo(-10, 12, -17, 9); c.quadraticCurveTo(-10, 8, -2, 4); c.closePath(); ink(c, m >= 3 ? '#fff5e0' : shade(pc[1], 0.3), 1.3); }
+  }
+  if (m >= 3) { c.beginPath(); c.moveTo(-1.7, -2.6); c.lineTo(0.6, 0); c.lineTo(-1.7, 2.6); c.lineTo(-4, 0); c.closePath(); ink(c, m >= 5 ? '#ffffff' : pc[1], 1.2); }
+  if (m >= 5) for (let i = 0; i < 6; i++) { const a = Math.PI * 0.62 + (i / 5) * Math.PI * 0.76; c.beginPath(); c.moveTo(1.5 + Math.cos(a) * 10, Math.sin(a) * 10); c.lineTo(1.5 + Math.cos(a) * 15.5, Math.sin(a) * 15.5); c.lineTo(1.5 + Math.cos(a + 0.18) * 10, Math.sin(a + 0.18) * 10); c.closePath(); ink(c, GOLD, 1.2); }
+  if (r >= 1) { // gafas de aviador (visera al nivel 3)
+    c.beginPath(); c.moveTo(3.5, -6.5); c.lineTo(-6, -8.5); c.moveTo(3.5, 6.5); c.lineTo(-6, 8.5); c.lineWidth = 2; c.strokeStyle = INK; c.stroke();
+    const R0 = r >= 3 ? 3.2 : 2.6;
+    if (r >= 3) { c.beginPath(); c.roundRect(1.5, -7.5, 4.6, 15, 2.3); ink(c, 'rgba(160,230,255,0.85)', 1.6); }
+    else for (const sd of [-1, 1]) { c.beginPath(); c.arc(3.6, sd * 4.1, R0, 0, TAU); ink(c, 'rgba(160,230,255,0.85)', 1.6); }
+    c.fillStyle = 'rgba(255,255,255,0.8)'; for (const sd of [-1, 1]) { c.beginPath(); c.arc(3, sd * 4.1 - 1, 0.9, 0, TAU); c.fill(); }
+    if (r >= 2) { c.fillStyle = pc[2]; c.fillRect(-5, -1, 4, 2); }
+  }
+}
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16), f = (v) => Math.max(0, Math.min(255, Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k))));
+  return '#' + [n >> 16, (n >> 8) & 255, n & 255].map((v) => f(v).toString(16).padStart(2, '0')).join('');
 }
 function arrow(c, x0, x1, y, fire) {
   line(c, x0, y, x1, y, '#c99a5a', 1.6);
@@ -525,10 +630,95 @@ const FIXED = { linter: Math.PI / 2, docker: Math.PI / 2, backup: 0, thread: 0, 
 
 function towerSprite(k, p) {
   return sprite('T' + k + p.join(''), 96, (c) => {
-    const sk = skin(k, p), sc = 0.92 * (1 + sk.tier * 0.035);
+    const sk = skin(k, p), sc = 0.9 * [1, 1.02, 1.04, 1.12, 1.15, 1.24][sk.tier];
     c.scale(sc, sc);
-    DRAW[k](c, { acc: sk.accent, tier: sk.tier, dom: sk.dom, p, mane: sk.tier >= 5 ? '#c9781c' : MANE });
+    const o = { acc: sk.accent, tier: sk.tier, dom: sk.dom, p, pc: TOWERS[k].paths.map((P) => P.color), mane: sk.tier >= 5 ? '#c9781c' : MANE };
+    decoUnder(c, o);
+    DRAW[k](c, o);
   });
+}
+/** Marcadores de los jugadores: 'b' construid aquí · 'a' atacad este barril (lo sigue) · 'h' ¡ayuda! */
+function drawPings(ctx, list, pos, time) {
+  for (const p of list) {
+    let x = p.x, y = p.y;
+    if (p.t === 'a' && p.e && pos.has(p.e)) [x, y] = pos.get(p.e);
+    const fade = p.age > 0.8 ? (1 - p.age) / 0.2 : 1, pop = Math.min(1, p.age * 12);
+    ctx.save(); ctx.globalAlpha = Math.max(0, fade); ctx.translate(x, y);
+    const R = 16 + 6 * ((time * 2) % 1);
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = p.col; ctx.globalAlpha *= 1 - ((time * 2) % 1) * 0.8; ctx.stroke();
+    ctx.globalAlpha = Math.max(0, fade);
+    ctx.scale(pop, pop);
+    if (p.t === 'a') { // diana sobre el barril
+      ctx.beginPath(); ctx.arc(0, 0, 13, 0, TAU); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke(); ctx.lineWidth = 2.6; ctx.strokeStyle = p.col; ctx.stroke();
+      for (const a of [0, 1, 2, 3]) { ctx.save(); ctx.rotate(a * Math.PI / 2 + time); line(ctx, 8, 0, 18, 0, INK, 5); line(ctx, 8, 0, 18, 0, p.col, 2.4); ctx.restore(); }
+      ctx.translate(0, -30);
+    } else {
+      ctx.translate(0, -22 - 3 * Math.abs(Math.sin(time * 5)));
+      ctx.beginPath(); ctx.moveTo(0, 20); ctx.lineTo(-10, 4); ctx.arc(0, 0, 12, Math.PI * 0.82, Math.PI * 0.18); ctx.closePath(); ink(ctx, p.col, 2.4);
+      if (p.t === 'h') txt(ctx, '!', 0, 6, INK, 17);
+      else { ctx.beginPath(); ctx.rect(-5, -5, 10, 10); ink(ctx, '#fff5e0', 1.6); ctx.beginPath(); ctx.moveTo(-6, -5); ctx.lineTo(0, -10); ctx.lineTo(6, -5); ctx.closePath(); ink(ctx, '#e8643c', 1.4); }
+      ctx.translate(0, -18);
+    }
+    txt(ctx, (p.t === 'a' ? '¡Atacad! ' : p.t === 'h' ? '¡Ayuda! ' : 'Construid aquí · ') + p.name, 0, 0, p.col, 11);
+    ctx.restore();
+  }
+}
+/** Dibuja una imagen de la caché centrada en (x, y), girada y escalada. */
+function blit(ctx, img, size, x, y, rot = 0, sc = 1, alpha = 1) {
+  ctx.save(); ctx.translate(x, y); if (rot) ctx.rotate(rot); if (sc !== 1) ctx.scale(sc, sc); if (alpha !== 1) ctx.globalAlpha *= alpha;
+  ctx.drawImage(img, -size / 2, -size / 2, size, size);
+  ctx.restore();
+}
+/** Halo de la calidad bajo la torre: Rara (azul), Épica (morado con chispas), Legendaria (oro que late). */
+export function drawRarity(ctx, k, x, y, time) {
+  const r = TOWERS[k].rar;
+  if (!r) return;
+  const col = RARITY[r].c;
+  const img = sprite('R' + r, 72, (c) => {
+    c.translate(0, 12); c.scale(1, 0.46);
+    if (r >= 2) {
+      const R = r >= 3 ? 33 : 26, g = c.createRadialGradient(0, 0, 4, 0, 0, R);
+      g.addColorStop(0, col + (r >= 3 ? 'aa' : '77')); g.addColorStop(1, col + '00');
+      c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, TAU); c.fill();
+    }
+    c.beginPath(); c.arc(0, 0, 21.5, 0, TAU); c.lineWidth = 4.3; c.strokeStyle = col; c.setLineDash(r >= 2 ? [] : [8, 6]); c.stroke();
+  });
+  blit(ctx, img, 72, x, y, 0, 1, r >= 3 ? 0.75 + 0.25 * Math.sin(time * 3) : 1);
+  if (r >= 2) {
+    const n = r >= 3 ? 4 : 2;
+    for (let i = 0; i < n; i++) {
+      const a = time * (r >= 3 ? 1.4 : 1) + (i / n) * TAU;
+      star(ctx, x + Math.cos(a) * 21.5, y + 12 + Math.sin(a) * 9.8, r >= 3 ? 3.6 : 2.8, 1.2, 4, a); ctx.fillStyle = r >= 3 ? '#fff6c2' : '#f0e0ff'; ctx.fill();
+    }
+  }
+}
+/** Efecto animado de nivel 5, distinto en cada rama (imágenes precalculadas que solo se giran). */
+function drawAura5(ctx, k, p, x, y, time) {
+  const d = p.indexOf(5), col = TOWERS[k].paths[d].color;
+  if (d === 0) { // fuego que late
+    const img = sprite('A0', 80, (c) => {
+      for (let j = 0; j < 2; j++) {
+        c.beginPath();
+        for (let i = 0; i < 28; i++) { const a = (i / 28) * TAU, R = (i % 2 ? 24 : 33 + 2 * Math.sin(i * 2.3)) * (j ? 0.85 : 1); c.lineTo(Math.cos(a) * R, Math.sin(a) * R); }
+        c.closePath(); c.fillStyle = j ? 'rgba(255,214,80,0.5)' : 'rgba(255,90,30,0.45)'; c.fill();
+      }
+    });
+    const s = 1 + 0.07 * Math.sin(time * 6);
+    blit(ctx, img, 80, x, y, time * 0.8, s, 0.75);
+    blit(ctx, img, 80, x, y, -time * 0.6, s * 0.8, 0.5);
+  } else if (d === 1) { // runas girando
+    const img = sprite('A1' + col, 80, (c) => {
+      c.beginPath(); c.arc(0, 0, 33, 0, TAU); c.lineWidth = 2.5; c.strokeStyle = col; c.setLineDash([9, 5]); c.stroke(); c.setLineDash([]);
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; star(c, Math.cos(a) * 33, Math.sin(a) * 33, 4, 1.6, 4, a); c.fillStyle = '#fff'; c.fill(); }
+    });
+    blit(ctx, img, 80, x, y, time * 0.7, 1, 0.85);
+  } else { // remolino de viento
+    const img = sprite('A2' + col, 80, (c) => {
+      c.lineCap = 'round';
+      for (let i = 0; i < 3; i++) { c.rotate(TAU / 3); c.beginPath(); c.arc(0, 0, 30, 0, 1.4); c.lineWidth = 4; c.strokeStyle = '#ffffff'; c.stroke(); c.beginPath(); c.arc(0, 0, 25, 0.3, 1.2); c.lineWidth = 2.5; c.strokeStyle = col; c.stroke(); }
+    });
+    blit(ctx, img, 80, x, y, time * 3, 1, 0.8);
+  }
 }
 /** Dibuja una torre. (Lo usa también la tienda para sus iconos.) */
 export function drawTower(ctx, k, x, y, p, ang, time, off) {
@@ -1103,13 +1293,9 @@ export function render(ctx, G, o) {
     ctx.beginPath(); ctx.ellipse(x, y + 12, 18, 8, 0, 0, TAU);
     ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = PLAYER_COLORS[t.o] || '#ffffff'; ctx.lineWidth = 2.8; ctx.stroke();
     if (o.selId === t.i) { ctx.beginPath(); ctx.ellipse(x, y + 12, 23.5, 11, 0, 0, TAU); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); }
-    if (tier >= 5 && !off) {
-      // aura dorada de Tier 5
-      const g = ctx.createRadialGradient(x, y, 8, x, y, 34);
-      g.addColorStop(0, 'rgba(255,220,80,0.55)'); g.addColorStop(1, 'rgba(255,220,80,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 34, 0, TAU); ctx.fill();
-      for (let i = 0; i < 4; i++) { const a = time * 1.6 + i * TAU / 4; star(ctx, x + Math.cos(a) * 26, y + Math.sin(a) * 26, 4, 1.6, 4, a); ctx.fillStyle = '#fff6c2'; ctx.fill(); }
-    }
+    // halos y auras animados: se apagan solos si el ordenador va justo (o.lowFx)
+    if (!off && !o.lowFx) drawRarity(ctx, t.k, x, y, time);
+    if (tier >= 5 && !off && !o.lowFx) drawAura5(ctx, t.k, t.p, x, y, time);
     if (t.at > 0 && t.k !== 'linter') { ctx.beginPath(); ctx.arc(x, y, 25 + 2 * Math.sin(time * 14), 0, TAU); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = '#ffe14a'; ctx.lineWidth = 2.6; ctx.stroke(); }
     if (t._cf) { ctx.beginPath(); ctx.arc(x, y, 22, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2; ctx.stroke(); }
     drawTower(ctx, t.k, x, y, t.p, t.a, time, off);
@@ -1145,6 +1331,7 @@ export function render(ctx, G, o) {
   }
 
   drawFx(ctx, time);
+  if (o.pings) drawPings(ctx, o.pings, pos, time);
 
   // celda con estructura bajo el ratón
   if (o.hover && !o.placing) {

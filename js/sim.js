@@ -44,7 +44,7 @@ export function newGame(map = 0, act = [0], decks = null) {
   if (!act.length) act = [0];
   const S = {
     ph: 'play', pa: 0, pb: '', au: 0, sp: 1, map: MAPS[map] ? map : 0, w: 0, wt: 0, si: 0, ic: 20,
-    money: [0, 0, 0, 0], act, gr: 0, st: [[0, 0], [0, 0], [0, 0], [0, 0]], gid: Date.now().toString(36) + (gidN++ % 1296).toString(36),
+    money: [0, 0, 0, 0], act, gr: 0, st: [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ch: null, cn: 0, cb: 0, tb: [{}, {}, {}, {}], lo: 0, gid: Date.now().toString(36) + (gidN++ % 1296).toString(36),
     life: M.life, nid: 1, kills: 0, T: [], E: [],
     ob: M.obs.map(() => 0), sw: M.forks.map(() => 0), swc: 0, tr: M.traps.map(() => ({ c: 0, a: 0 })),
     dk: [0, 1, 2, 3].map((i) => cleanDeck(decks && decks[i])), rvu: 0,
@@ -58,6 +58,102 @@ export function newGame(map = 0, act = [0], decks = null) {
 
 // ---------- oro por jugador ----------
 /** Da oro a un jugador (cuenta para su estadística de oro ganado). */
+/**
+ * Estadísticas de cada jugador en la partida: st[puesto] = [daño, oro generado, barriles eliminados, habilidades,
+ * torres construidas, mejoras, mejoras de nivel 5, barriles ralentizados, vidas curadas, oro donado].
+ */
+export const ST = { dmg: 0, gold: 1, kills: 2, abil: 3, built: 4, ups: 5, t5: 6, slowed: 7, heal: 8, gift: 9 };
+const NST = 10;
+/** Partida que se está simulando ahora (para apuntar estadísticas desde funciones pequeñas como slowE). */
+let CUR = null;
+
+// ---------- RETOS COOPERATIVOS ----------
+// Cada pocas oleadas aparece un reto para todo el equipo. Si se cumple: oro para todos y filetes al final.
+// ok(S) = se puede proponer · goal(S) = objetivo · base = de qué contador sale el progreso
+export const CHALLENGES = {
+  nolife: { t: 'Que no pase ni un barril en esta oleada', ok: () => true, goal: () => 1 },
+  combos: { t: 'Haced {n} combos en esta oleada', ok: (S) => S.T.some((t) => t.k === 'balancer' || t.k === 'docker'), goal: (S) => 6 + Math.floor(S.w / 3) },
+  share: { t: 'Que cada jugador haga al menos el {n}% del daño de la oleada', ok: (S) => S.act.length > 1, goal: (S) => Math.floor(60 / S.act.length) },
+  abil: { t: 'Usad {n} habilidades en esta oleada', ok: (S) => S.T.some((t) => tStats(t).ab), goal: (S) => Math.min(6, 1 + S.act.length) },
+  slow: { t: 'Ralentizad {n} barriles en esta oleada', ok: (S) => S.T.some((t) => { const q = tStats(t); return q.slow || q.aslow || TOWERS[t.k].ai === 'aura'; }), goal: (S) => 15 + S.w * 2 },
+  build: { t: 'Construid {n} torres nuevas en esta oleada', ok: () => true, goal: (S) => 1 + S.act.length },
+  rarity: { t: 'Tened en el mapa torres de {n} calidades distintas', ok: (S) => deckRarities(S) >= 2, goal: (S) => Math.min(3, deckRarities(S)) },
+  boss: { t: 'Romped el Tonel gigante en menos de {n} segundos', ok: () => false, goal: () => 30 },
+};
+export const CH_KEYS = Object.keys(CHALLENGES);
+export const chText = (c) => CHALLENGES[CH_KEYS[c.k]].t.replace('{n}', c.n);
+function deckRarities(S) {
+  const r = new Set();
+  for (const d of S.dk) if (d) for (const [k] of d) r.add(TOWERS[k].rar);
+  if (!S.dk.some((d) => d)) r.add(0).add(1);
+  return r.size;
+}
+const sumSt = (S, i) => S.act.reduce((a, x) => a + S.st[x][i], 0);
+/** Al empezar una oleada: ¿toca reto? (oleadas 2, 5, 8… y todas las de jefe) */
+function chStart(S) {
+  S.ch = null;
+  if (S.chOff || S.w < 2) return;
+  let key = null;
+  if (S.w % 5 === 0) key = 'boss';
+  else if (S.w % 3 === 2) {
+    const opts = CH_KEYS.filter((k) => k !== 'boss' && CHALLENGES[k].ok(S));
+    let h = 0;
+    for (const c of S.gid + S.w) h = (h * 31 + c.charCodeAt(0)) >>> 0; // igual en todos los ordenadores, sin tocar el azar del juego
+    key = opts[h % opts.length];
+  }
+  if (!key) return;
+  const k = CH_KEYS.indexOf(key);
+  S.ch = { k, n: CHALLENGES[key].goal(S), p: 0, st: 0, tm: key === 'boss' ? 0 : -1, e: 0,
+    b: [S.lo, S.cb, sumSt(S, 3), sumSt(S, 7), sumSt(S, 4), ...S.act.map((x) => S.st[x][0])], a: S.act.slice() };
+  S._fx.push(['ch', 'new', chText(S.ch)]);
+}
+function chWin(S) {
+  const c = S.ch;
+  c.st = 1; S.cn++;
+  const gold = Math.round(50 + 12 * S.w);
+  for (const x of S.act) give(S, x, gold);
+  S._fx.push(['ch', 'ok', chText(c), gold], ['t', 640, 230, '¡RETO CUMPLIDO! +' + gold + ' de oro cada uno', '#7fe05a', 2.5]);
+}
+function chFail(S) {
+  S.ch.st = 2;
+  S._fx.push(['ch', 'fail', chText(S.ch)]);
+}
+/** Comprueba el reto en curso (se llama en cada paso). */
+function chTick(S, dt) {
+  const c = S.ch;
+  if (!c || c.st) return;
+  const key = CH_KEYS[c.k], b = c.b;
+  switch (key) {
+    case 'nolife': c.p = 0; if (S.lo > b[0]) chFail(S); return;
+    case 'combos': c.p = S.cb - b[1]; break;
+    case 'abil': c.p = sumSt(S, 3) - b[2]; break;
+    case 'slow': c.p = sumSt(S, 7) - b[3]; break;
+    case 'build': c.p = sumSt(S, 4) - b[4]; break;
+    case 'rarity': c.p = new Set(S.T.map((t) => TOWERS[t.k].rar)).size; break;
+    case 'boss':
+      if (c.e && dt) { c.tm += dt; if (c.tm > c.n) { chFail(S); return; } }
+      return;
+    case 'share': return;
+  }
+  if (c.p >= c.n) chWin(S);
+}
+/** Al acabar la oleada se cierran los retos que dependen de toda la oleada. */
+function chEnd(S) {
+  const c = S.ch;
+  if (!c || c.st) return;
+  const key = CH_KEYS[c.k];
+  if (key === 'nolife') { chWin(S); return; }
+  if (key === 'share') {
+    const d = c.a.map((x, i) => (S.act.includes(x) ? S.st[x][0] - c.b[5 + i] : null)).filter((v) => v !== null);
+    const tot = d.reduce((a, v) => a + v, 0);
+    c.p = tot ? Math.floor((Math.min(...d) / tot) * 100) : 0;
+    if (tot && c.p >= c.n) chWin(S); else chFail(S);
+    return;
+  }
+  if (key === 'boss' && c.e) return; // el jefe sigue vivo: lo decide el tiempo
+  chFail(S);
+}
+
 function give(S, s, amt) { S.money[s] += amt; S.st[s][1] += amt; }
 /** Reparte oro a partes iguales entre los jugadores presentes. */
 function shareGold(S, amt) { for (const s of S.act) give(S, s, amt / S.act.length); }
@@ -159,9 +255,10 @@ function mkTower(S, k, cx, cy, cost, o, lv) {
 function mkEnemy(S, k, r, d) {
   const M = MAPS[S.map];
   const m = Math.round(ENEMIES[k].hp * hpMult(Math.max(1, S.w)) * M.hp * S._m.ehp);
-  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0, kb: 0, nr: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
+  const e = { i: S.nid++, k, r, d, h: m, m, sl: 0, sf: 0, st: 0, im: 0, b: 0, ac: 0, bn: 0, bt: 0, vu: 0, vt: 0, fz: 0, wt: 0, oi: 0, oc: 0, cc: 0, rv: 0, kb: 0, nr: 0, sb: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
   place(M, e);
   S.E.push(e);
+  if (ENEMIES[k].boss && S.ch && !S.ch.st && !S.ch.e && CH_KEYS[S.ch.k] === 'boss') S.ch.e = e.i; // empieza a contar el tiempo
   return e;
 }
 
@@ -177,6 +274,7 @@ function offerCards(S) {
 // ---------- acciones de los jugadores ----------
 /** Aplica una acción. Devuelve true si cambió algo. */
 export function applyAction(S, a) {
+  CUR = S;
   if (!a || typeof a !== 'object') return false;
   if (a.t === 'restart') {
     if (S.ph === 'play') return false;
@@ -211,6 +309,15 @@ export function applyAction(S, a) {
     case 'next':
       if (S.ic > 0 && !S.pa && !S.cd) { callEarly(S, 0.01); return true; }
       return false;
+    case 'gift': { // donar oro a un compañero
+      const to = a.to | 0;
+      if (sl < 0 || to === sl || !S.act.includes(to)) return false;
+      const amt = Math.floor(a.amt < 0 ? S.money[sl] : Math.min(S.money[sl], a.amt | 0));
+      if (amt <= 0) return false;
+      S.money[sl] -= amt; S.money[to] += amt; S.st[sl][9] += amt;
+      S._fx.push(['dn', sl, to, amt]);
+      return true;
+    }
     case 'build': {
       if (sl < 0 || !TOWERS[a.k] || !underLimit(S, a.k, sl) || !cellFree(S, a.cx, a.cy)) return false;
       const card = S.dk[sl] ? S.dk[sl].find((x) => x[0] === a.k) : [a.k, 1];
@@ -218,6 +325,7 @@ export function applyAction(S, a) {
       const cost = buildCost(S, a.k);
       if (S.money[sl] < cost) return false;
       S.money[sl] -= cost; mkTower(S, a.k, a.cx, a.cy, cost, sl, card[1]);
+      S.st[sl][4]++; S.tb[sl][a.k] = (S.tb[sl][a.k] || 0) + 1;
       return true;
     }
     case 'up': {
@@ -227,6 +335,7 @@ export function applyAction(S, a) {
       const cost = upgradeCost(S, t, i);
       if (S.money[sl] < cost) return false;
       S.money[sl] -= cost; t.inv += cost; t.p = t.p.slice(); t.p[i]++;
+      S.st[sl][5]++; if (t.p[i] === 5) S.st[sl][6]++;
       syncSoldiers(S, t); rally(S, t);
       return true;
     }
@@ -253,7 +362,9 @@ export function applyAction(S, a) {
     }
     case 'abil': {
       const t = own();
-      return !!t && !S.pa && !S.cd && useAbility(S, t);
+      if (!t || S.pa || S.cd || !useAbility(S, t)) return false;
+      S.st[sl][3]++;
+      return true;
     }
     case 'clear': {
       const i = a.i | 0, o = M.obs[i];
@@ -350,6 +461,7 @@ function useAbility(S, t) {
     case 'restore': {
       const before = S.life;
       S.life = Math.max(S.life, Math.min(M.life, S.life + s.abHeal));
+      if (t.o >= 0) S.st[t.o][8] += S.life - before;
       S._fx.push(['l', S.life - before]);
       break;
     }
@@ -465,9 +577,16 @@ function payout(S, e) {
   let tot = e.dn, pool = e.dn; // pool = daño de nadie (o de jugadores que ya no están): a partes iguales
   for (let s = 0; s < 4; s++) { tot += e.dm[s]; if (!act.includes(s)) pool += e.dm[s]; }
   for (const s of act) give(S, s, base * (tot > 0 ? (e.dm[s] + pool / n) / tot : 1 / n) * (1 + S._bounty[s]));
+  // el barril cuenta como "roto" para quien más daño le hizo
+  let top = -1;
+  for (const s of act) if (e.dm[s] > 0 && (top < 0 || e.dm[s] > e.dm[top])) top = s;
+  if (top >= 0) S.st[top][2]++;
+  if (S.ch && !S.ch.st && S.ch.e === e.i) chWin(S);
 }
 function slowE(e, f, t) {
   if (!f) return;
+  const src = CUR && CUR._src;
+  if (src && src.o >= 0 && !(e.sb & (1 << src.o))) { e.sb |= 1 << src.o; CUR.st[src.o][7]++; } // estadística: barriles ralentizados
   if (e.sl <= 0 || f >= e.sf) { e.sf = f; e.sl = Math.max(e.sl, t); }
 }
 /** Empuja al barril hacia atrás por el camino (los voladores no; los jefes, poco). */
@@ -489,7 +608,7 @@ function vulnE(e, v, t) {
 /** COMBO Explosión de aceite: un barril ACEITADO que recibe fuego explota en área. */
 function ignite(S, e, o) {
   if (e.oi <= 0 || e.h <= 0) return;
-  e.oi = 0; e.oc = 3;
+  e.oi = 0; e.oc = 3; S.cb++;
   S._boom.push([e._x, e._y, Math.min(900, 25 + e.m * 0.1) * S._m.combo, 55, 1, '#ff9d00', 0, o]); // el combo es de quien pone el fuego
   S._fx.push(['t', Math.round(e._x), Math.round(e._y) - 18, '¡BOOM!', '#ff9d00', 0.8]);
 }
@@ -501,7 +620,7 @@ function burnE(S, e, dps, t, fire, o = -1) {
 }
 
 function leak(S, e) {
-  S.life -= ENEMIES[e.k].dmg; e.h = 0; S._fx.push(['h']);
+  S.life -= ENEMIES[e.k].dmg; S.lo += ENEMIES[e.k].dmg; e.h = 0; S._fx.push(['h']);
   if (S._lk) S._lk[e.k] = (S._lk[e.k] || 0) + ENEMIES[e.k].dmg;
 }
 
@@ -565,6 +684,7 @@ export function calcBuffs(S) {
 /** Avanza la simulación dt segundos. */
 export function step(S, dt) {
   if (S.ph !== 'play' || S.pa || S.cd) return;
+  CUR = S;
   const M = MAPS[S.map], m = S._m;
 
   if (S.swc > 0) S.swc -= dt;
@@ -575,6 +695,7 @@ export function step(S, dt) {
     S.ic -= dt;
     if (S.ic <= 0) {
       S.ic = 0; S.w++; S.wt = 0; S.si = 0; S._fx.push(['w', S.w]);
+      chStart(S);
       for (const en of M.entries) if (en.from === S.w && S.w > 1) S._fx.push(['t', 640, 190, '¡SE HA ABIERTO UNA CUEVA!', '#ff5a4a', 3]);
     }
   } else {
@@ -586,6 +707,7 @@ export function step(S, dt) {
       while (S.si < q.length && q[S.si].t <= S.wt) { mkEnemy(S, q[S.si].type, cyc[S.si % cyc.length], 0); S.si++; }
     }
     if (S.si >= q.length && !S.E.some((e) => e.h > 0)) {
+      chEnd(S);
       if (S.w >= M.waves) { S.ph = 'won'; return; }
       endWave(S);
     }
@@ -795,7 +917,7 @@ export function step(S, dt) {
             slowE(e, s.slow, 1.5); stunE(e, s.stun);
             if (e.wt > 0 && s.type === 'e') {
               // COMBO Descarga: barril mojado + rayo
-              if (e.cc <= 0) { e.cc = 2; stunE(e, 0.25); S._fx.push(['z', Math.round(ox), Math.round(oy)]); }
+              if (e.cc <= 0) { e.cc = 2; S.cb++; stunE(e, 0.25); S._fx.push(['z', Math.round(ox), Math.round(oy)]); }
               hit(e, dmg * s.wetM * m.shock);
             } else hit(e, dmg);
             dmg *= s.fall;
@@ -896,6 +1018,7 @@ export function step(S, dt) {
   S._src = null;
 
   finish(S);
+  chTick(S, dt);
 }
 
 /** Explosiones pendientes, limpieza de muertos y fin de partida. También se usa tras una acción. */
@@ -918,7 +1041,7 @@ function finish(S) {
     const ph = S.T.find((t) => tStats(t).revive && t.o >= 0 && !(S.rvu & (1 << t.o)));
     if (ph) {
       const s = tStats(ph);
-      S.rvu |= 1 << ph.o; S.life = s.revive; ph.dz = 45;
+      S.rvu |= 1 << ph.o; S.life = s.revive; ph.dz = 45; S.st[ph.o][8] += s.revive;
       if (s.reviveStun) for (const e of S.E) stunE(e, s.reviveStun);
       S._fx.push(['g', '#ff6a2a'], ['t', 640, 260, '¡EL FÉNIX SALVA LA GUARIDA!', '#ffb52a', 3.5]);
     } else { S.life = 0; S.ph = 'lost'; }
@@ -931,10 +1054,10 @@ function endWave(S) {
   const M = MAPS[S.map];
   // bonus de oleada: a partes iguales. Lo que dan los Mercaderes es de su dueño.
   const base = Math.round(waveBonus(S.w) * S._m.wave);
-  let total = base, heal = 0;
+  let total = base;
   shareGold(S, base);
   for (const sl of S.act) {
-    let wb = 0, interest = 0, cap = 0;
+    let wb = 0, interest = 0, cap = 0, heal = 0;
     for (const t of S.T) {
       if (t.k !== 'backup' || t.o !== sl) continue;
       const s = tStats(t);
@@ -943,8 +1066,8 @@ function endWave(S) {
     }
     const extra = Math.round((wb + (interest ? Math.min(cap, Math.floor(S.money[sl] * interest)) : 0)) * S._m.wave);
     if (extra) { give(S, sl, extra); total += extra; }
+    if (heal && S.life < M.life) { const b = S.life; S.life = Math.min(M.life, S.life + heal); S.st[sl][8] += S.life - b; S._fx.push(['l', S.life - b]); }
   }
-  if (heal && S.life < M.life) { const b = S.life; S.life = Math.min(M.life, S.life + heal); S._fx.push(['l', S.life - b]); }
   S._fx.push(['m', 640, 300, total]);
   S.ic = 12;
   if (S.w % 5 === 0) offerCards(S); // tras cada jefe: elegir reliquia
@@ -956,7 +1079,7 @@ const r1 = (n) => Math.round(n * 10) / 10;
 
 export function pack(S, fx) {
   return JSON.stringify({
-    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => [Math.round(a[0]), Math.round(a[1])]), gi: S.gid, dk: S.dk.map((d) => (d ? d.map((x) => [TOWER_KEYS.indexOf(x[0]), x[1]]) : 0)), ru: S.rvu, li: S.life, n: S.nid, ki: S.kills,
+    p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => a.map(Math.round)), ch: S.ch && [S.ch.k, S.ch.n, Math.round(S.ch.p), S.ch.st, r1(S.ch.tm), S.ch.e], cn: S.cn, tb: S.tb.map((o) => Object.entries(o).map(([k, n]) => [TOWER_KEYS.indexOf(k), n])), lo: S.lo, gi: S.gid, dk: S.dk.map((d) => (d ? d.map((x) => [TOWER_KEYS.indexOf(x[0]), x[1]]) : 0)), ru: S.rvu, li: S.life, n: S.nid, ki: S.kills,
     ob: S.ob.join(''), sw: S.sw.join(''), sc: Math.ceil(Math.max(0, S.swc)), tr: S.tr.map((t) => [Math.ceil(Math.max(0, t.c)), r1(Math.max(0, t.a))]), md: S.md, cd: S.cd,
     T: S.T.map((t) => {
       const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at)), t.o, t.lv || 1,
@@ -972,7 +1095,7 @@ export function pack(S, fx) {
 
 export function unpack(str) {
   const o = JSON.parse(str);
-  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: o.st || [[0, 0], [0, 0], [0, 0], [0, 0]], gid: o.gi || '', dk: (o.dk || [0, 0, 0, 0]).map((d) => (d ? d.map((x) => [TOWER_KEYS[x[0]], x[1]]) : null)), rvu: o.ru || 0, life: o.li, nid: o.n, kills: o.ki,
+  const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: (o.st || [0, 1, 2, 3].map(() => [])).map((a) => Array.from({ length: NST }, (_, i) => a[i] || 0)), ch: o.ch ? { k: o.ch[0], n: o.ch[1], p: o.ch[2], st: o.ch[3], tm: o.ch[4], e: o.ch[5] } : null, cn: o.cn || 0, tb: (o.tb || [[], [], [], []]).map((l) => Object.fromEntries(l.map(([i, n]) => [TOWER_KEYS[i], n]))), lo: o.lo || 0, gid: o.gi || '', dk: (o.dk || [0, 0, 0, 0]).map((d) => (d ? d.map((x) => [TOWER_KEYS[x[0]], x[1]]) : null)), rvu: o.ru || 0, life: o.li, nid: o.n, kills: o.ki,
     ob: String(o.ob || '').split('').map(Number), sw: String(o.sw || '').split('').map(Number), swc: o.sc || 0, tr: (o.tr || []).map((a) => ({ c: a[0], a: a[1] })),
     md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0], _gb: 0, _gr: 0, _gs: 0, _src: null };
   S._m = calcMods(S.md);
@@ -987,7 +1110,7 @@ export function unpack(str) {
   S.E = (o.E || []).map((a) => {
     const f = a[6];
     const e = { i: a[0], k: ENEMY_KEYS[a[1]], r: a[2], d: a[3], h: a[4], m: a[5], sl: f & 1 ? 0.5 : 0, sf: 0.4, st: f & 2 ? 0.3 : 0, im: 0, b: 0, ac: 0,
-      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0, kb: 0, nr: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
+      bn: 0, bt: f & 4 ? 0.5 : 0, vu: f & 128 ? 1 : 0.25, vt: f & 8 ? 0.5 : 0, fz: 0, wt: f & 16 ? 1 : 0, oi: f & 32 ? 1 : 0, oc: 0, cc: 0, rv: f & 64 ? 5 : 0, kb: 0, nr: 0, sb: 0, dm: [0, 0, 0, 0], dn: 0, bo: -1, fo: -1 };
     place(M, e);
     return e;
   });

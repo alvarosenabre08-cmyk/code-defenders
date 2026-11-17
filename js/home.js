@@ -262,9 +262,11 @@ function open() {
   const res = prog.openChest(p);
   if (!res) return;
   $('bagMsg').textContent = '';
+  const extra = api.afterChest ? api.afterChest() : null; // misiones y logros de cofres
   save(true);      // se guarda antes de enseñar el premio: recargar la página no cambia lo que ha salido
   refresh();
   playChest(res);
+  if (extra && api.celebrate) setTimeout(() => api.celebrate(extra), 2600); // después de ver lo que ha salido
 }
 
 // ---------- Mazos ----------

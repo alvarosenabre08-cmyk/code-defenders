@@ -13,7 +13,7 @@ export async function connect() {
   let actionCb = null;
   const chatCbs = [];
   // Una clave de localStorage por dato (y por jugador) para que las pestañas no se pisen.
-  const MAPS = ['players', 'c', 'seats'];
+  const MAPS = ['players', 'c', 'seats', 'm'];
   const key = (kind, id) => 'cdmock:' + code + ':' + kind + (id ? ':' + id : '');
   const read = (k) => JSON.parse(localStorage.getItem(k) || 'null');
   const loadKind = (kind) => {
@@ -27,7 +27,7 @@ export async function connect() {
   };
   // Cada pestaña guarda una copia en memoria; los cambios viajan dentro del mensaje.
   let cache = {};
-  const seed = () => { cache = {}; for (const k of ['meta', 's', 'players', 'c', 'seats']) cache[k] = loadKind(k); };
+  const seed = () => { cache = {}; for (const k of ['meta', 's', 'players', 'c', 'seats', 'm']) cache[k] = loadKind(k); };
   const fire = (kind) => subs.filter((s) => s.kind === kind).forEach((s) => s.cb(cache[kind] ?? null));
   const apply = (kind, id, val) => {
     if (!MAPS.includes(kind)) { cache[kind] = val; return; }
@@ -50,16 +50,16 @@ export async function connect() {
   const api = {
     pid,
     get code() { return code; },
-    async create(name, uid, dk) {
+    async create(name, uid, dk, bg) {
       code = 'TEST';
       Object.keys(localStorage).filter((k) => k.startsWith('cdmock:')).forEach((k) => localStorage.removeItem(k));
       seed();
       put('meta', '', { host: pid, started: false });
       put('seats', uid, 0);
-      put('players', pid, { name, slot: 0, uid, dk: dk || '', at: Date.now() });
+      put('players', pid, { name, slot: 0, uid, dk: dk || '', bg: bg || '', at: Date.now() });
       return code;
     },
-    async join(c, name, uid, dk) {
+    async join(c, name, uid, dk, bg) {
       code = c; seed();
       if (!cache.meta) { code = ''; throw new Error('No existe ninguna sala con ese código.'); }
       const used = Object.values(cache.players || {}).filter((p) => p.uid !== uid).map((p) => p.slot);
@@ -67,7 +67,7 @@ export async function connect() {
       if (!next) { code = ''; throw new Error('La sala está llena (máximo 4 jugadores).'); }
       for (const u of Object.keys(cache.seats || {})) if (next[u] === undefined) put('seats', u, null);
       put('seats', uid, next[uid]);
-      put('players', pid, { name, slot: next[uid], uid, dk: dk || '', at: Date.now() });
+      put('players', pid, { name, slot: next[uid], uid, dk: dk || '', bg: bg || '', at: Date.now() });
       return code;
     },
     on(kind, cb) { subs.push({ kind, cb }); cb(cache[kind] ?? null); },
@@ -77,12 +77,13 @@ export async function connect() {
     onChat(cb) { chatCbs.push(cb); },
     publish(str) { put('s', '', str); },
     cursor(c) { put('c', pid, c); },
+    ping(m) { put('m', pid, m); },
     async setDeck(dk) { const me = (cache.players || {})[pid]; if (me) put('players', pid, { ...me, dk }); },
     async setMeta(m) { put('meta', '', { ...(cache.meta || {}), ...m }); },
     async claimHost(old) { const m = cache.meta; if (m.host === old) put('meta', '', { ...m, host: pid }); },
     leave() {
       if (!code) return;
-      put('players', pid, null); put('c', pid, null);
+      put('players', pid, null); put('c', pid, null); put('m', pid, null);
       subs.length = 0; code = '';
     },
   };

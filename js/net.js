@@ -55,10 +55,11 @@ export async function connect() {
   const unsubs = [];
   const R = (p) => db.ref(database, 'cd_rooms/' + code + (p ? '/' + p : ''));
 
-  async function enter(name, slot, uid, dk) {
+  async function enter(name, slot, uid, dk, bg) {
     await db.onDisconnect(R('players/' + pid)).remove();
     await db.onDisconnect(R('c/' + pid)).remove();
-    await db.set(R('players/' + pid), { name, slot, uid, dk: dk || '', at: db.serverTimestamp() });
+    await db.onDisconnect(R('m/' + pid)).remove();
+    await db.set(R('players/' + pid), { name, slot, uid, dk: dk || '', bg: bg || '', at: db.serverTimestamp() });
   }
 
   return {
@@ -66,18 +67,18 @@ export async function connect() {
     get code() { return code; },
 
     /** dk = mazo del jugador en texto ("torre+nivel" separados por comas). */
-    async create(name, uid, dk) {
+    async create(name, uid, dk, bg) {
       for (let i = 0; i < 20; i++) {
         code = randCode();
         const s = await db.get(R('players'));
         if (!s.exists()) break; // libre (o abandonada: se reutiliza)
       }
       await db.set(R(), { meta: { host: pid, started: false, at: db.serverTimestamp() }, seats: { [uid]: 0 } });
-      await enter(name, 0, uid, dk);
+      await enter(name, 0, uid, dk, bg);
       return code;
     },
 
-    async join(c, name, uid, dk) {
+    async join(c, name, uid, dk, bg) {
       code = c;
       const room = (await db.get(R())).val();
       if (!room || !room.meta) { code = ''; throw new Error('No existe ninguna sala con ese código.'); }
@@ -89,7 +90,7 @@ export async function connect() {
       });
       const seats = res.snapshot.val() || {};
       if (!res.committed || seats[uid] === undefined) { code = ''; throw new Error('La sala está llena (máximo 4 jugadores).'); }
-      await enter(name, seats[uid], uid, dk);
+      await enter(name, seats[uid], uid, dk, bg);
       return code;
     },
 
@@ -108,6 +109,8 @@ export async function connect() {
     onChat(cb) { unsubs.push(db.onChildAdded(db.query(R('chat'), db.limitToLast(30)), (snap) => cb(snap.val()))); },
     publish(str) { if (code) db.set(R('s'), str); },
     cursor(c) { if (code) db.set(R('c/' + pid), c); },
+    /** Marcador en el mapa: { t: tipo, x, y, e: id del barril, n: número para distinguir uno de otro }. */
+    ping(m) { if (code) db.set(R('m/' + pid), m); },
     /** Cambia mi mazo en la sala (antes de empezar la partida). */
     setDeck(dk) { if (code) return db.update(R('players/' + pid), { dk }); },
     setMeta(m) { return db.update(R('meta'), m); },
@@ -116,7 +119,7 @@ export async function connect() {
 
     leave() {
       unsubs.forEach((u) => u()); unsubs.length = 0;
-      if (code) { db.remove(R('players/' + pid)); db.remove(R('c/' + pid)); }
+      if (code) { db.remove(R('players/' + pid)); db.remove(R('c/' + pid)); db.remove(R('m/' + pid)); }
       code = '';
     },
   };

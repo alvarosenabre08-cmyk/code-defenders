@@ -11,12 +11,15 @@ import { W, H, CELL, COLS, MAPS, PLAYER_COLORS, PLAYER_COLOR_NAMES, TOWERS, RARI
 import {
   newGame, step, settle, applyAction, setRoster, setDeck, pack, unpack, STEP, TARGET_MODES,
   cellFree, underLimit, limitFor, towerAt, buildCost, upgradeCost, lockReason, sellValue, tStats, tRange,
+  chText, CH_KEYS, epos,
 } from './sim.js';
 import { render, addFx, clearFx, drawTower, drawMapThumb } from './render.js';
 import { isConfigured } from './net.js';
 import * as account from './account.js';
 import * as prog from './meta.js';
 import * as homeUI from './home.js';
+import * as Q from './goals.js';
+import * as goalsUI from './goals-ui.js';
 
 const $ = (id) => document.getElementById(id);
 const now = () => performance.now() / 1000;
@@ -74,10 +77,24 @@ async function doAuth(mode) {
 function afterLogin(acc) {
   me = acc; myName = acc.name;
   prog.normalize(me.profile); // completa lo que falte (cuentas de antes de los cofres, datos a medias...)
+  Q.normalize(me.profile);
+  // las cuentas de antes de los logros reciben ahora los que ya se habían ganado
+  const res = { missions: [], ach: Q.checkAch(me.profile) };
+  if (res.ach.length) { account.save({}).catch((err) => console.error(err)); setTimeout(() => goalsUI.celebrate(res), 600); }
   homeUI.start();
   renderHome(); show('home');
 }
-homeUI.init({ profile: () => me?.profile, save: () => account.save({}) });
+homeUI.init({
+  profile: () => me?.profile, save: () => account.save({}),
+  afterChest: () => Q.addChests(me.profile, 1), celebrate: (r) => { goalsUI.celebrate(r); renderHome(); },
+});
+goalsUI.init({
+  profile: () => me?.profile, name: () => me?.name || '', isLocal: () => account.isLocal(),
+  save: () => account.save({}).catch((err) => { console.error(err); goalsUI.toast('<b>No se ha podido guardar</b><br>Revisa la conexión.'); }),
+  refreshAll: () => renderHome(),
+});
+/** Insignia elegida (se manda a la sala junto al nombre). */
+const myBadge = () => me?.profile.badge || '';
 
 // ---------- mazos: cómo viajan por la red ----------
 /** Mazo → texto corto para la sala: "firewall1,gc3,king1". */
@@ -115,18 +132,13 @@ $('homeNav').addEventListener('click', (e) => {
 function renderHome() {
   if (!me) return;
   homeUI.refresh();
-  const st = me.profile.st, since = new Date(me.profile.created || Date.now()).toLocaleDateString('es-ES');
+  const st = me.profile.st;
   $('homeName').textContent = me.name;
   $('homeSub').textContent = `${st.games} partidas · ${st.wins} victorias`;
-  const best = MAPS.map((M, i) => `<div class="sbox"><b>${st.best?.[i] || 0}<small> / ${M.waves}</small></b><small>Mejor oleada en ${M.name}${st.mapWins?.[i] ? ` · ${st.mapWins[i]} ${st.mapWins[i] === 1 ? 'victoria' : 'victorias'}` : ''}</small></div>`).join('');
-  $('statGrid').innerHTML = `
-    <div class="sbox"><b>${fmt(st.games)}</b><small>Partidas jugadas</small></div>
-    <div class="sbox"><b>${fmt(st.wins)}</b><small>Victorias</small></div>
-    <div class="sbox"><b>${fmt(st.kills)}</b><small>Barriles rotos (por tu manada)</small></div>
-    <div class="sbox"><b>${fmt(st.dmg)}</b><small>Daño hecho por tus torres</small></div>
-    <div class="sbox"><b>${fmt(st.gold)}</b><small>Oro ganado</small></div>${best}`;
-  $('profileBox').innerHTML = `Nombre: <b>${esc(me.name)}</b><br>Cuenta creada el <b>${since}</b><br>Partidas: <b>${st.games}</b> · Victorias: <b>${st.wins}</b>`
-    + (account.isLocal() ? '<br><span style="color:var(--amber)">Esta cuenta está guardada solo en este navegador.</span>' : '');
+  const room = me.profile.room, fresh = room && room.c && Date.now() - room.at < 3 * 3600e3;
+  $('rejoinBox').classList.toggle('hidden', !fresh);
+  if (fresh) $('rejoinTxt').textContent = `Sala ${room.c} · si se te cortó la conexión, tus torres y tu oro te esperan 2 minutos.`;
+  goalsUI.refresh();
 }
 // ---------- jugar: crear sala, unirse o práctica ----------
 if (!isConfigured() && !MOCK) {
@@ -147,29 +159,54 @@ async function enterRoom(fn) {
     await fn();
     $('menuMsg').textContent = '';
     $('lobbyCode').textContent = $('hudCode').textContent = net.code;
+    me.profile.room = { c: net.code, at: Date.now() }; // para "Volver a la partida" si se corta la conexión
+    account.save({}).catch((err) => console.error(err));
     show('lobby');
     subscribe();
   } catch (err) {
     console.error(err);
     $('menuMsg').textContent = err.message?.includes('sala') ? err.message : 'Error de conexión: ' + (err.message || err);
+    if (err.message?.includes('sala') && me?.profile.room) { me.profile.room = null; account.save({}).catch(() => {}); renderHome(); }
   }
 }
-$('btnCreate').onclick = () => enterRoom(() => net.create(myName, me.uid, myDeckStr()));
+$('btnCreate').onclick = () => enterRoom(() => net.create(myName, me.uid, myDeckStr(), myBadge()));
+$('btnRejoin').onclick = () => { const r = me?.profile.room; if (r) enterRoom(() => net.join(r.c, myName, me.uid, myDeckStr(), myBadge())); };
+$('btnRejoinNo').onclick = () => { if (me) { me.profile.room = null; account.save({}).catch(() => {}); renderHome(); } };
 $('btnJoin').onclick = () => {
   const code = $('inCode').value.trim().toUpperCase();
   if (!/^[A-Z]{4}$/.test(code)) { $('menuMsg').textContent = 'El código son 4 letras.'; return; }
-  enterRoom(() => net.join(code, myName, me.uid, myDeckStr()));
+  enterRoom(() => net.join(code, myName, me.uid, myDeckStr(), myBadge()));
 };
 $('inCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnJoin').click(); });
 $('btnSolo').onclick = () => {
   if (!me) return;
   solo = true; isHost = true;
-  players = { me: { name: myName, slot: 0, dk: myDeckStr() } }; slotNames[0] = myName;
+  players = { me: { name: myName, slot: 0, dk: myDeckStr(), bg: myBadge() } }; slotNames[0] = myName;
   $('lobbyCode').textContent = $('hudCode').textContent = 'SOLO';
   updateLobby(); show('lobby');
 };
 // Salir al menú: se recarga la página (la sesión se recupera sola y vuelves al menú principal)
-$('btnLeave').onclick = () => { net?.leave(); location.reload(); };
+/** Salir de la sala o de la partida y volver al menú principal. */
+async function leaveToMenu() {
+  net?.leave();
+  if (me) { me.profile.room = null; await account.save({}).catch(() => {}); }
+  location.reload(); // la sesión sigue iniciada: se vuelve directamente al menú
+}
+$('btnLeave').onclick = leaveToMenu;
+// ---- salir durante la partida (con confirmación) ----
+function askExit() {
+  if (!G || G.ph === 'won' || G.ph === 'lost') return leaveToMenu(); // ya ha terminado: nada que perder
+  const multi = !solo && G.act.length > 1;
+  $('exitText').innerHTML = multi
+    ? 'La partida sigue para tus compañeros. Tus torres y tu oro te esperan <b>2 minutos</b> por si vuelves (con el mismo código de sala); después pasan a ellos.<br>Esta partida no contará para tus estadísticas, misiones ni filetes.'
+    : 'Se perderá la partida. No contará para tus estadísticas, misiones ni filetes.';
+  $('exitModal').classList.remove('hidden');
+}
+$('btnExit').onclick = (e) => { e.currentTarget.blur(); askExit(); };
+$('ovExit').onclick = leaveToMenu;
+$('btnExitYes').onclick = leaveToMenu;
+$('btnExitNo').onclick = () => $('exitModal').classList.add('hidden');
+$('exitModal').addEventListener('click', (e) => { if (e.target === $('exitModal')) $('exitModal').classList.add('hidden'); });
 addEventListener('pagehide', () => net?.leave());
 
 // ---------- sala ----------
@@ -193,9 +230,10 @@ function subscribe() {
     const u = unpack(str);
     prevMap = G ? new Map(G.E.map((e) => [e.i, e.d])) : null;
     G = u.S; snapAt = performance.now();
-    addFx(u.fx, now());
+    addFx(u.fx, now()); gameEvents(u.fx);
   });
   net.on('c', (c) => { cursors = c || {}; });
+  net.on('m', onPings);
   net.onChat(addChat);
 }
 function toLobby() {
@@ -230,7 +268,7 @@ function sortedPlayers() {
 let lobbySig = '';
 function updateLobby() {
   const list = sortedPlayers(), myId = net ? net.pid : 'me';
-  const sig = JSON.stringify([list.map((p) => [p[0], p[1].name, p[1].slot, p[1].dk]), meta?.host, solo, me?.profile.deck, me?.profile.decks.map((d) => d.n + d.t.join())]);
+  const sig = JSON.stringify([list.map((p) => [p[0], p[1].name, p[1].slot, p[1].dk, p[1].bg]), meta?.host, solo, me?.profile.deck, me?.profile.decks.map((d) => d.n + d.t.join())]);
   if (sig !== lobbySig) {
     lobbySig = sig;
     const ul = $('lobbyPlayers');
@@ -241,6 +279,7 @@ function updateLobby() {
       const col = PLAYER_COLORS[p[1].slot % 4];
       li.style.borderColor = col;
       li.innerHTML = `<span style="color:${col}">${esc(p[1].name)}${p[0] === meta?.host ? ' ★' : ''}${p[0] === myId ? ' (tú)' : ''}<small> · ${PLAYER_COLOR_NAMES[p[1].slot % 4]}</small></span>`;
+      if (p[1].bg && Q.ACH_BY_ID[p[1].bg]) { const t = li.firstElementChild; t.prepend(goalsUI.badgeIcon(p[1].bg, 30)); t.classList.add('with-badge'); }
       li.append(homeUI.deckIcons(parseDeck(p[1].dk), 30));
       ul.append(li);
     }
@@ -280,7 +319,7 @@ function updateChips() {
   chipSig = sig;
   $('hudMine').style.setProperty('--mine', PLAYER_COLORS[mine]);
   $('hudPlayers').innerHTML = rows.map(([x, gold, on]) =>
-    `<span class="chip${on ? '' : ' away'}" style="border-color:${PLAYER_COLORS[x]};color:${PLAYER_COLORS[x]}" title="${on ? 'Oro de ' + esc(slotName(x)) : esc(slotName(x)) + ' se ha desconectado'}"><span class="nm">${esc(slotName(x))}</span><i class="coin"></i>${gold}</span>`).join('');
+    `<span class="chip${on ? '' : ' away'}" data-gift="${x}" style="border-color:${PLAYER_COLORS[x]};color:${PLAYER_COLORS[x]}" title="${on ? 'Oro de ' + esc(slotName(x)) + ' · clic para donarle oro' : esc(slotName(x)) + ' se ha desconectado: tiene 2 minutos para volver'}"><span class="nm">${esc(slotName(x))}</span><i class="coin"></i>${gold}</span>`).join('');
 }
 $('btnStart').onclick = () => {
   if (!isHost) return;
@@ -368,7 +407,8 @@ function stopHost() {
  * guarda el sitio 15 s (por si solo ha recargado o se le ha caído el wifi); pasado ese tiempo,
  * sus torres pasan al jugador con menos torres y su oro se reparte.
  */
-const GRACE_MS = 15000, goneAt = {};
+// 2 minutos para volver si se corta la conexión (solo en modo de pruebas se puede acortar: ?mock&grace=15)
+const GRACE_MS = (MOCK && +new URLSearchParams(location.search).get('grace')) * 1000 || 120000, goneAt = {};
 let lastMode = '';
 function syncRoster() {
   const here = presentSlots();
@@ -404,7 +444,7 @@ function tick() {
     let n = 0;
     while (acc >= STEP && n++ < 400) { step(S, STEP); acc -= STEP; }
   }
-  if (S._fx.length) { addFx(S._fx, now()); outFx.push(...S._fx); S._fx.length = 0; }
+  if (S._fx.length) { addFx(S._fx, now()); gameEvents(S._fx); outFx.push(...S._fx); S._fx.length = 0; }
   if (solo || !net) { outFx.length = 0; return; }
   const every = S.ph === 'play' && !S.pa && !S.cd ? PUBLISH_MS : 2000;
   // fin de partida, pausa o reliquias: se publica al momento para que todos lo vean a la vez
@@ -513,6 +553,7 @@ cv.addEventListener('pointermove', (e) => {
 cv.addEventListener('pointerleave', () => { hover = null; });
 cv.addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); });
 cv.addEventListener('pointerdown', (e) => {
+  if (e.button === 1 && G) { e.preventDefault(); mouse = toCanvas(e); pingAt('auto'); return; }
   if (e.button !== 0 || !G) return;
   mouse = toCanvas(e);
   const cx = Math.floor(mouse.x / CELL), cy = Math.floor(mouse.y / CELL);
@@ -632,7 +673,8 @@ addEventListener('keydown', (e) => {
   if (current() !== 'game' || e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const playing = G && G.ph === 'play';
-  if (k === 'Escape') { cancel(); $('keys').classList.add('hidden'); }
+  if (k === 'Escape') { $('exitModal').classList.add('hidden'); cancel(); $('keys').classList.add('hidden'); closeGift(); $('statsPanel').classList.add('hidden'); }
+  else if (k === 'e' && G) toggleStats();
   else if (k === 'h') toggleKeys();
   else if (k === 'p') act({ t: 'pause' });
   else if (!playing) return;
@@ -652,6 +694,9 @@ addEventListener('keydown', (e) => {
     if (!t && oi >= 0) clearOb(oi); else sell(t);
   }
   else if (k === 'm') startMove(targetTower());
+  else if (k === 'b') pingAt('auto');
+  else if (k === 'v') pingAt('h');
+  else if (k === 'g') openGift();
   else if (k === 'Tab') { e.preventDefault(); cycleTower(); }
 });
 $('btnPause').onclick = () => act({ t: 'pause' });
@@ -818,6 +863,8 @@ function updateHud() {
   setTxt('btnAuto', G.au ? 'Auto [A]: ON' : 'Auto [A]: OFF');
   $('btnAuto').classList.toggle('on', !!G.au);
   setTxt('btnSpeed', `Vel. x${G.sp} [F]`);
+  $('btnGift').classList.toggle('hidden', G.act.length < 2);
+  updateReto(); updateStatsPanel();
   $('btnSpeed').classList.toggle('on', G.sp > 1);
   buildShop();
   for (const k of shopKeys) {
@@ -863,41 +910,187 @@ function updateHud() {
     $('ovBtn2').classList.toggle('hidden', state === 'pause' || !isHost);
     $('ovScore').classList.toggle('hidden', state !== 'won' && state !== 'lost');
     $('ovFil').classList.toggle('hidden', state !== 'won' && state !== 'lost');
-    if (state === 'won' || state === 'lost') { $('ovScore').innerHTML = scoreTable(); recordResult(); }
+    if (state !== 'won' && state !== 'lost') $('ovGoals').classList.add('hidden');
+    $('ovRetos').classList.toggle('hidden', state !== 'won' && state !== 'lost');
+    if (state === 'won' || state === 'lost') { $('ovScore').innerHTML = scoreTable(); $('ovRetos').innerHTML = retosTxt(); recordResult(); $('statsPanel').classList.add('hidden'); closeGift(); }
     if (state === 'pause') { $('ovTitle').textContent = 'PAUSA'; $('ovSub').textContent = `Pausado por ${G.pb || '?'} — cualquiera puede reanudar`; $('ovBtn').textContent = 'Reanudar'; }
     if (state === 'won') { $('ovTitle').textContent = '¡VICTORIA!'; $('ovSub').textContent = `La manada ha defendido ${M.name} durante ${M.waves} oleadas y le quedan ${G.life} vidas. ¡Buen trabajo!`; $('ovBtn').textContent = 'Jugar otra vez'; }
     if (state === 'lost') { $('ovTitle').textContent = 'LA GUARIDA HA CAÍDO'; $('ovSub').textContent = `Los barriles arrasaron ${M.name} en la oleada ${G.w} de ${M.waves}.`; $('ovBtn').textContent = 'Reintentar'; }
   }
 }
 
-/** Marcador de fin de partida: daño y oro ganado de cada jugador. */
-function scoreTable() {
+/** Columnas de estadísticas de la partida (st[i] de cada jugador). */
+const STAT_COLS = [[0, 'Daño'], [2, 'Eliminados'], [1, 'Oro generado'], [7, 'Ralentizados'], [8, 'Curación'], [9, 'Oro donado']];
+/** Tabla por jugador; la mejor cifra de cada columna lleva corona. */
+function statsTableHtml() {
+  const rows = [...G.act].sort((a, b) => G.st[b][0] - G.st[a][0]);
+  const best = STAT_COLS.map(([i]) => Math.max(0, ...G.act.map((x) => G.st[x][i])));
   const total = G.act.reduce((a, x) => a + G.st[x][0], 0) || 1;
-  return '<tr><th>Jugador</th><th>Daño</th><th>% del daño</th><th>Oro ganado</th></tr>' + [...G.act].sort((a, b) => G.st[b][0] - G.st[a][0]).map((x) =>
-    `<tr><td style="color:${PLAYER_COLORS[x]}">${esc(slotName(x))}${x === mySlot() ? ' (tú)' : ''}</td><td class="n">${fmt(G.st[x][0])}</td><td class="n">${Math.round((G.st[x][0] / total) * 100)}%</td><td class="n">${fmt(G.st[x][1])}</td></tr>`).join('');
+  return '<tr><th>Jugador</th>' + STAT_COLS.map(([, n]) => `<th>${n}</th>`).join('') + '</tr>' + rows.map((x) =>
+    `<tr><td style="color:${PLAYER_COLORS[x]}">${esc(slotName(x))}${x === mySlot() ? ' (tú)' : ''}</td>`
+    + STAT_COLS.map(([i], j) => {
+      const v = G.st[x][i], top = G.act.length > 1 && v > 0 && v === best[j];
+      return `<td class="n${top ? ' best' : ''}">${top ? '<i class="crown">♛</i>' : ''}${fmt(v)}${i === 0 ? `<small> ${Math.round((v / total) * 100)}%</small>` : ''}</td>`;
+    }).join('') + '</tr>').join('');
 }
+function scoreTable() { return statsTableHtml(); }
+const retosTxt = () => (G.cn ? `Retos cooperativos cumplidos: <b>${G.cn}</b> (+${G.cn * RETO_FIL} filetes para cada uno)` : 'Ningún reto cooperativo cumplido esta vez.');
+/** Filetes por cada reto cumplido (para cada jugador). */
+const RETO_FIL = 5;
 /** Guarda el resultado en mi cuenta (una sola vez por partida). */
 let savedGid = '';
+/** Resumen de MI partida para estadísticas, misiones y logros. */
+function gameSummary(x, won) {
+  const s = G.st[x], top = Math.max(...G.act.map((y) => G.st[y][0]));
+  return {
+    map: G.map, won, wave: G.w, players: G.act.length, teamKills: G.kills,
+    dmg: s[0], gold: s[1], kills: s[2], abil: s[3], built: s[4], ups: s[5], t5: s[6], slowed: s[7], heal: s[8], gift: s[9], retos: G.cn || 0, tb: G.tb[x] || {},
+    lost: G.lo, mvp: s[0] > 0 && s[0] >= top, revived: !!((G.rvu >> x) & 1),
+    deckRar: Math.max(0, ...(G.dk[x] || []).map((d) => TOWERS[d[0]].rar)),
+  };
+}
 function recordResult() {
-  const x = mySlot(), won = G.ph === 'won', gain = prog.reward(G.map, G.w, won);
-  $('ovFil').innerHTML = !me || !G.act.includes(x) ? '' : gain ? `<i class="steak"></i> +${gain} filetes${won ? '' : ' (ganando te llevas más)'}` : 'Aguanta al menos una oleada para ganar filetes.';
+  const x = mySlot(), won = G.ph === 'won', retoFil = (G.cn || 0) * RETO_FIL, gain = prog.reward(G.map, G.w, won) + retoFil;
+  $('ovFil').innerHTML = !me || !G.act.includes(x) ? '' : gain ? `<i class="steak"></i> +${gain} filetes${retoFil ? ` (${retoFil} por retos)` : ''}${won ? '' : ' · ganando te llevas más'}` : 'Aguanta al menos una oleada para ganar filetes.';
   if (!me || !G.gid || savedGid === G.gid || !G.act.includes(x)) return;
   savedGid = G.gid;
+  $('ovGoals').classList.add('hidden');
   if (me.profile.lastGid === G.gid) return; // ya estaba guardada (por ejemplo, tras recargar la página)
-  const st = me.profile.st;
   me.profile.inv.fil += gain;
-  const next = {
-    ...st, games: st.games + 1, wins: st.wins + (won ? 1 : 0), kills: st.kills + G.kills, dmg: st.dmg + G.st[x][0], gold: st.gold + G.st[x][1],
-    best: { ...st.best, [G.map]: Math.max(st.best?.[G.map] || 0, G.w) },
-    mapWins: { ...st.mapWins, [G.map]: (st.mapWins?.[G.map] || 0) + (won ? 1 : 0) },
-  };
-  account.save({ st: next, lastGid: G.gid, inv: me.profile.inv }).then(renderHome).catch((err) => { console.error(err); info('No se ha podido guardar el resultado en tu cuenta.', true); });
+  const res = Q.addGame(me.profile, gameSummary(x, won));
+  me.profile.lastGid = G.gid;
+  const html = goalsUI.summaryHtml(res);
+  $('ovGoals').innerHTML = html; $('ovGoals').classList.toggle('hidden', !html);
+  goalsUI.updateNavDot(); // en partida no salen avisos: la lista ya está en la pantalla final
+  account.save({}).then(renderHome).catch((err) => { console.error(err); info('No se ha podido guardar el resultado en tu cuenta.', true); });
+}
+
+// ============================================================
+//  FASE 5: donaciones, marcadores, retos y panel de estadísticas
+// ============================================================
+/** Avisos que llegan dentro de los efectos de la partida (igual para anfitrión e invitados). */
+function gameEvents(list) {
+  for (const f of list) {
+    if (f[0] === 'dn') {
+      const mineIn = f[1] === mySlot() || f[2] === mySlot();
+      addChat({ sys: 1, m: `${slotName(f[1])} ha enviado ${f[3]} de oro a ${slotName(f[2])}.` });
+      if (f[2] === mySlot()) info(`¡${slotName(f[1])} te ha enviado ${f[3]} de oro!`);
+      else if (mineIn) info(`Has enviado ${f[3]} de oro a ${slotName(f[2])}.`);
+    } else if (f[0] === 'ch') {
+      retoShownAt = performance.now();
+      if (f[1] === 'new') addChat({ sys: 1, m: `Reto cooperativo: ${f[2]}` });
+      if (f[1] === 'ok') addChat({ sys: 1, m: `¡Reto cumplido! +${f[3]} de oro para cada uno.` });
+      if (f[1] === 'fail') addChat({ sys: 1, m: 'Reto fallado. Habrá más.' });
+    }
+  }
+}
+
+// ---- donar oro ----
+let giftTo = -1;
+function openGift(to) {
+  if (!G || G.act.length < 2 || G.ph !== 'play') return;
+  const mates = G.act.filter((x) => x !== mySlot());
+  giftTo = mates.includes(to) ? to : mates.includes(giftTo) ? giftTo : mates[0];
+  const box = $('gift');
+  box.innerHTML = `<h4>Donar oro <small>(tienes ${Math.floor(myGold())})</small></h4>
+    <div class="g-to">${mates.map((x) => `<button class="btn small${x === giftTo ? ' sel' : ''}" data-to="${x}" style="--pc:${PLAYER_COLORS[x]}">${esc(slotName(x))}</button>`).join('')}</div>
+    <div class="g-amt">${[50, 100, 250].map((n) => `<button class="btn small" data-amt="${n}"${myGold() < n ? ' disabled' : ''}>${n}</button>`).join('')}<button class="btn small" data-amt="-1"${myGold() < 1 ? ' disabled' : ''}>Todo</button></div>
+    <button class="btn small ghost" data-close="1">Cerrar [Esc]</button>`;
+  box.classList.remove('hidden');
+}
+function closeGift() { $('gift').classList.add('hidden'); }
+$('gift').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.close) return closeGift();
+  if (b.dataset.to) return openGift(+b.dataset.to);
+  if (b.dataset.amt) { act({ t: 'gift', to: giftTo, amt: +b.dataset.amt }); closeGift(); }
+});
+$('btnGift').onclick = (e) => { e.currentTarget.blur(); $('gift').classList.contains('hidden') ? openGift() : closeGift(); };
+$('hudPlayers').addEventListener('click', (e) => { const c = e.target.closest('[data-gift]'); if (c) openGift(+c.dataset.gift); });
+
+// ---- marcadores en el mapa ----
+const PING_MS = 5000, PING_GAP = 2000;
+let pings = {}, pingSeen = {}, lastPing = -1e9, pingN = 0;
+function onPings(m) {
+  const t = performance.now();
+  for (const [pid, p] of Object.entries(m || {})) {
+    if (!p || pingSeen[pid] === p.n) continue;
+    pingSeen[pid] = p.n;
+    pings[pid] = { ...p, at: t };
+  }
+}
+/** tipo: 'auto' (barril bajo el ratón → "atacad", si no → "construid aquí") o 'h' (¡ayuda!). */
+function pingAt(type) {
+  if (!G || G.ph !== 'play') return;
+  const t = performance.now();
+  if (t - lastPing < PING_GAP) return info('Espera un momento antes de poner otro marcador.', true);
+  const M = MAPS[G.map];
+  let tp = type, e = 0, x = Math.round(mouse.x), y = Math.round(mouse.y);
+  if (x < 0 || y < 0 || x > W || y > H) return;
+  if (type === 'auto') {
+    let best = null, bd = 26 * 26;
+    for (const q of G.E) {
+      const p = epos(M, q.k, q.r, q.d), dy = ENEMIES[q.k].fly ? 26 : 0, d = (p.x - x) ** 2 + (p.y - dy - y) ** 2;
+      if (d < bd) { bd = d; best = q; }
+    }
+    tp = best ? 'a' : 'b';
+    if (best) e = best.i;
+  }
+  lastPing = t;
+  const p = { t: tp, x, y, e, n: ++pingN, s: mySlot() };
+  if (net && !solo) net.ping(p); else onPings({ me: p });
+}
+function pingList() {
+  const t = performance.now(), out = [];
+  for (const [pid, p] of Object.entries(pings)) {
+    const age = t - p.at;
+    if (age > PING_MS) { delete pings[pid]; continue; }
+    const pl = players[pid] || (pid === 'me' ? { name: myName, slot: 0 } : null);
+    out.push({ t: p.t, x: p.x, y: p.y, e: p.e, age: age / PING_MS, col: PLAYER_COLORS[(pl ? pl.slot : p.s) % 4], name: pl ? pl.name : '' });
+  }
+  return out;
+}
+
+// ---- reto cooperativo en curso ----
+let retoShownAt = 0, retoSig = '';
+function updateReto() {
+  const c = G.ch, box = $('reto');
+  const show = c && G.ph === 'play' && (!c.st || performance.now() - retoShownAt < 4000);
+  if (!show) { if (!box.classList.contains('hidden')) box.classList.add('hidden'); retoSig = ''; return; }
+  const key = CH_KEYS[c.k];
+  const prog = c.st === 1 ? '¡Cumplido!' : c.st === 2 ? 'Fallado' : key === 'boss' ? (c.e ? `${Math.max(0, Math.ceil(c.n - c.tm))} s` : 'esperando al jefe…')
+    : key === 'nolife' ? 'en curso' : key === 'share' ? 'se mira al acabar la oleada' : `${Math.min(c.p, c.n)} / ${c.n}`;
+  const sig = c.k + '|' + c.st + '|' + prog;
+  if (sig === retoSig) return;
+  retoSig = sig;
+  box.className = 'reto' + (c.st === 1 ? ' ok' : c.st === 2 ? ' fail' : '');
+  box.innerHTML = `<b>Reto cooperativo</b> ${esc(chText(c))} <span>${prog}</span>`;
+}
+
+// ---- panel de estadísticas ----
+let statsAt = 0;
+function toggleStats() { $('statsPanel').classList.toggle('hidden'); statsAt = 0; updateStatsPanel(); }
+$('btnStats').onclick = (e) => { e.currentTarget.blur(); toggleStats(); };
+function updateStatsPanel() {
+  if ($('statsPanel').classList.contains('hidden') || performance.now() - statsAt < 500) return;
+  statsAt = performance.now();
+  $('statsTable').innerHTML = statsTableHtml();
+  $('statsRetos').innerHTML = retosTxt();
 }
 
 // ---------- bucle de dibujo ----------
+// Si el ordenador va justo (menos de ~40 fps), se apagan los efectos de adorno; vuelven cuando va holgado.
+let fxEma = 16, lowFx = false, lastFrameAt = 0;
 function frame() {
   requestAnimationFrame(frame);
-  if (current() !== 'game' || !G) return;
+  if (current() !== 'game' || !G) { lastFrameAt = 0; return; }
+  const pn = performance.now();
+  if (lastFrameAt && pn - lastFrameAt < 200) { // (las pausas largas, como cambiar de pestaña, no cuentan)
+    fxEma += (pn - lastFrameAt - fxEma) * 0.05;
+    if (!lowFx && fxEma > 25) lowFx = true; else if (lowFx && fxEma < 18) lowFx = false;
+  }
+  lastFrameAt = pn;
   const t = now();
   // cursores de los demás, suavizados
   const list = [];
@@ -913,7 +1106,7 @@ function frame() {
     time: t,
     prev: isHost ? null : prevMap,
     alpha: Math.min(1, (performance.now() - snapAt) / PUBLISH_MS),
-    hover, placing, placingP: mv ? mv.p : null, movingId, selId, selOb,
+    hover, placing, placingP: mv ? mv.p : null, movingId, selId, selOb, lowFx, pings: pingList(),
     valid: !!(placing && hover && cellFree(G, hover.cx, hover.cy, movingId || undefined) && (movingId || (underLimit(G, placing, mySlot()) && myGold() >= buildCost(G, placing)))),
     cursors: list,
   });
@@ -923,4 +1116,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 // acceso para pruebas automáticas
-window.__cd = { prog, get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, get me() { return me; }, get slot() { return mySlot(); }, act };
+window.__cd = { prog, Q, pingList, get pings() { return pings; }, get lowFx() { return lowFx; }, get G() { return G; }, get isHost() { return isHost; }, get net() { return net; }, get me() { return me; }, get slot() { return mySlot(); }, act };
