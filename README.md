@@ -1,6 +1,6 @@
 # Leones TD: Defensa de la Sabana
 
-Tower Defense cooperativo en tiempo real para 1-4 jugadores, con 3 mapas. Gráficos estilo dibujo animado pintados por código en Canvas 2D (sin imágenes).
+Tower Defense cooperativo en tiempo real para 1-4 jugadores, con 6 mapas. Gráficos estilo dibujo animado pintados por código en Canvas 2D (sin imágenes).
 Se aloja igual que Haxball Turbo: **GitHub → Vercel**, con **Firebase Realtime Database** para el multijugador.
 No hay nada que instalar ni compilar: son archivos estáticos.
 
@@ -56,7 +56,13 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 - **Marcadores**: `B` o clic central pone "construid aquí" (o "atacad este barril" si apuntas a uno, y lo sigue); `V` pone "¡ayuda!". Duran 5 s, en tu color. Uno cada 2 s.
 - **Retos cooperativos**: en las oleadas 2, 5, 8, 11… y en todas las de jefe aparece un reto para todo el equipo (que no pase ningún barril, combos, habilidades, ralentizar, construir, calidades distintas, repartir el daño, romper el jefe a tiempo). Cumplido: oro para todos y +5 filetes cada uno al final.
 - **Estadísticas de la partida**: tecla `E` (o botón Stats). Daño, eliminados, oro generado, ralentizados, curación y oro donado de cada jugador. Al terminar sale la pantalla de resultados con la mejor cifra de cada columna marcada con corona.
-- **3 mapas**: *Sabana* (fácil, 20 oleadas), *Selva* (medio, 25: cruce con señal para desviar los barriles, cueva que se abre en la oleada 8, puente levadizo y río) y *Volcán* (difícil, 30: dos frentes, tótems de poder, 75 vidas).
+- **6 mapas**, cada uno más grande y difícil que el anterior (los grandes se dibujan encogidos para que se vean enteros):
+  - *Sabana* (fácil, 20 oleadas): un camino largo, brasas, dinamita.
+  - *Selva* (medio, 25): cruce con señal, cueva en la oleada 8, puente levadizo y río.
+  - *Volcán* (difícil, 30): dos frentes, tótems de poder (+30% de daño), 75 vidas.
+  - *Pantano* (muy difícil, 30, 36×18 casillas): 3 entradas. **Barro** (frena), **niebla** (los barriles solo los ven las torres con detección), **esclusas** que se abren con un clic y lo inundan todo 6 s, y una señal para mandarlos por el rodeo.
+  - *Cañón* (extremo, 35, 40×20): 4 entradas. **Riscos** (+25% de alcance a la torre de encima), **viento** (acelera a los barriles), **desprendimientos** (una roca baja rodando y golpea a todo el tramo), puentes, río y lava.
+  - *Ciudadela* (legendario, 40, 44×22): 5 entradas y la guarida en el centro. **Día y noche**: de noche las torres ven un 30% menos salvo cerca de una **antorcha** encendida. **Cañones** de la muralla que disparan al barril más fuerte y 2 señales que por defecto mandan a los barriles por el atajo.
 - **20 torres en 4 calidades**. Se empieza con 8 (Arquero, Cañonero, Cuartel de Leonas, Mercader, Tamborilero, Cazador, Alquimista y Chamán); las otras 12 salen en cofres:
   - *Comunes*: León Hondero, León Pescador.
   - *Raras*: León Luchador, León Escarcha, León Bandido, León Halconero.
@@ -86,7 +92,7 @@ No hay nada que instalar ni compilar: son archivos estáticos.
 
 | Archivo | Qué hace |
 |---|---|
-| `js/data.js` | Mapas, torres (calidad + 3 ramas × 5 niveles), barriles, reliquias y oleadas. **Aquí se equilibra el juego.** |
+| `js/data.js` | Mapas (caminos, entradas, objetos y tamaño de cada uno), torres (calidad + 3 ramas × 5 niveles), barriles, reliquias y oleadas. **Aquí se equilibra el juego.** |
 | `js/sim.js` | Lógica del juego (sin DOM ni red). |
 | `js/render.js` | Dibujo en Canvas: mapas, leones, barriles y efectos. |
 | `js/net.js` | Salas, puestos de los jugadores, acciones, cursores, chat y estado con Firebase. |

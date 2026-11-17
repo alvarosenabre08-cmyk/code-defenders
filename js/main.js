@@ -483,7 +483,7 @@ function previewText() {
 }
 function hoverText() {
   if (!hover || placing) return '';
-  const M = MAPS[G.map], key = hover.cy * COLS + hover.cx;
+  const M = MAPS[G.map], key = hover.cy * MAPS[G.map].cols + hover.cx;
   const t = towerAt(G, hover.cx, hover.cy);
   if (t) return t.o === mySlot()
     ? `${TOWERS[t.k].name} ${t.p.join('-')}: U/I/O mejorar rama · T objetivo · Q habilidad · M mover · X vender`
@@ -493,14 +493,23 @@ function hoverText() {
   if (M.padAt.has(key)) return 'Tótem de poder: la torre que construyas aquí hace +30% de daño.';
   const ti = M.trapAt.get(key);
   if (ti !== undefined) {
-    return M.traps[ti].t === 'bomb'
-      ? 'Dinamita: haz clic para detonarla. Explosión en área, aturde y prende a los barriles aceitados. Recarga 50 s.'
-      : 'Puente levadizo: haz clic para levantarlo 4 s (los barriles se amontonan delante). Recarga 45 s.';
+    return {
+      bomb: 'Dinamita: haz clic para detonarla. Explosión en área, aturde y prende a los barriles aceitados. Recarga 50 s.',
+      gate: 'Puente levadizo: haz clic para levantarlo 4 s (los barriles se amontonan delante). Recarga 45 s.',
+      flood: 'Esclusa: haz clic para inundar la zona 6 s. Los barriles de tierra van mucho más lentos y quedan MOJADOS. Recarga 35 s.',
+      rock: 'Desprendimiento: haz clic para soltar una roca que baja rodando por el camino hacia la entrada: golpea y aturde a todos los barriles que pilla. Recarga 45 s.',
+      cannon: 'Cañón de la muralla: haz clic para disparar al barril más fuerte del mapa (el jefe primero). Recarga 30 s.',
+      torch: 'Antorcha: haz clic para encenderla 35 s. De noche, las torres cerca de una antorcha encendida no pierden alcance.',
+    }[M.traps[ti].t];
   }
   if (M.swAt.has(key)) return 'Señal del cruce: haz clic para desviar los barriles por la otra rama. Recarga 8 s.';
   const z = M.zoneAt.get(key);
   if (z === 'heat') return 'Brasas / lava: queman a los barriles que pasan (más cuanto más lentos vayan) y hacen explotar a los aceitados.';
   if (z === 'cool') return 'Río: deja MOJADOS a los barriles. El León Chamán les hace una Descarga.';
+  if (z === 'mud') return 'Barro: los barriles van un 40% más lentos mientras lo cruzan.';
+  if (z === 'wind') return 'Viento: ¡cuidado! Los barriles van un 35% más rápido mientras lo cruzan.';
+  if (z === 'fog') return 'Niebla: los barriles que pasan por dentro solo los ven las torres con detección (como los camuflados).';
+  if (M.highAt.has(key)) return 'Risco: la torre que construyas aquí tiene +25% de alcance.';
   return '';
 }
 function idleText() {
@@ -544,7 +553,8 @@ function cancel() { placing = null; movingId = null; selId = null; selOb = -1; m
 // ---------- entrada en el canvas ----------
 function toCanvas(e) {
   const r = cv.getBoundingClientRect();
-  return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
+  const k = G ? MAPS[G.map].k : 1; // los mapas grandes se dibujan encogidos: pasamos a coordenadas del mapa
+  return { x: ((e.clientX - r.left) * W) / r.width / k, y: ((e.clientY - r.top) * H) / r.height / k };
 }
 cv.addEventListener('pointermove', (e) => {
   mouse = toCanvas(e); mouseDirty = true;
@@ -559,7 +569,7 @@ cv.addEventListener('pointerdown', (e) => {
   const cx = Math.floor(mouse.x / CELL), cy = Math.floor(mouse.y / CELL);
   hover = { cx, cy };
   if (G.ph !== 'play' || G.cd) return;
-  const M = MAPS[G.map], key = cy * COLS + cx, oi = M.obsAt.get(key), hasOb = oi !== undefined && !G.ob[oi];
+  const M = MAPS[G.map], key = cy * M.cols + cx, oi = M.obsAt.get(key), hasOb = oi !== undefined && !G.ob[oi];
   if (placing) {
     if (hasOb) return info('Ahí hay un obstáculo: quítalo primero (clic sobre él sin torre elegida, o X).', true);
     if (movingId) {
@@ -603,7 +613,7 @@ function targetOb() {
   if (!G) return -1;
   if (selOb >= 0 && !G.ob[selOb]) return selOb;
   if (!hover) return -1;
-  const oi = MAPS[G.map].obsAt.get(hover.cy * COLS + hover.cx);
+  const oi = MAPS[G.map].obsAt.get(hover.cy * MAPS[G.map].cols + hover.cx);
   return oi !== undefined && !G.ob[oi] ? oi : -1;
 }
 const NO_TOWER = 'Selecciona una torre o pon el ratón encima.';
@@ -772,7 +782,7 @@ function updatePanel() {
   if (!t) {
     if (selId && !placing) selId = null;
     if (G && selOb >= 0 && !G.ob[selOb]) {
-      const M = MAPS[G.map], o = M.obs[selOb], can = myGold() >= o[2], pad = M.padAt.has(o[1] * COLS + o[0]);
+      const M = MAPS[G.map], o = M.obs[selOb], can = myGold() >= o[2], pad = M.padAt.has(o[1] * M.cols + o[0]);
       const sig = ['ob', selOb, can].join();
       if (sig === panelSig) return;
       panelSig = sig;
@@ -1027,7 +1037,7 @@ function pingAt(type) {
   if (t - lastPing < PING_GAP) return info('Espera un momento antes de poner otro marcador.', true);
   const M = MAPS[G.map];
   let tp = type, e = 0, x = Math.round(mouse.x), y = Math.round(mouse.y);
-  if (x < 0 || y < 0 || x > W || y > H) return;
+  if (x < 0 || y < 0 || x > MAPS[G.map].W || y > MAPS[G.map].H) return;
   if (type === 'auto') {
     let best = null, bd = 26 * 26;
     for (const q of G.E) {

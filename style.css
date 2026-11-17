@@ -436,3 +436,6 @@ table.maps { width: 100%; max-width: 640px; }
 #ovScore.wide { width: auto; min-width: min(860px, 94%); margin: 0 auto; }
 .exit-box { align-items: center; text-align: center; width: min(480px, 100%); --rc: #e8443a; }
 .exit-box p { color: var(--cream) !important; font-size: 15px !important; }
+/* 6 mapas: dos filas de 3, de más fácil a más difícil */
+.maps { max-width: 940px; margin-left: auto; margin-right: auto; }
+.diff.d3 { background: #e8443a; color: #fff; } .diff.d4 { background: #b0306a; color: #fff; } .diff.d5 { background: linear-gradient(90deg, #6a4aff, #c084f5); color: #fff; }

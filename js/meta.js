@@ -27,7 +27,7 @@ export const DECK_SIZE = 6;
 export const MAX_DECKS = 5;
 export const HIST = 12;
 /** Cuánto multiplica cada mapa los filetes ganados (los difíciles dan más). */
-export const MAP_FACTOR = [1, 1.4, 1.8];
+export const MAP_FACTOR = [1, 1.4, 1.8, 2.2, 2.6, 3];
 
 /** Mazo con el que empieza una cuenta nueva (6 de las 8 torres iniciales; se puede cambiar en Mazos). */
 export const DEFAULT_DECK = ['firewall', 'gc', 'debugger', 'docker', 'balancer', 'backup'];

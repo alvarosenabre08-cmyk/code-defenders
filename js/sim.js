@@ -13,6 +13,24 @@ export const STEP = 1 / 30;
 export const TARGET_MODES = ['Primero', 'Último', 'Más fuerte', 'Más cercano'];
 let gidN = 0; // contador para el identificador de partida (sin usar Math.random: no altera el azar del juego)
 const BOMB_CD = 50, GATE_CD = 45, GATE_T = 4, SWITCH_CD = 8, BOMB_R = 95;
+// objetos de los mapas grandes
+const FLOOD_T = 6, FLOOD_CD = 35, ROCK_CD = 45, ROCK_LEN = 480, CANNON_CD = 30, TORCH_T = 35, TORCH_R = 150;
+/** Día y noche (Ciudadela): ciclo de 75 s, los últimos 25 son de noche. */
+export const DAY_LEN = 75, NIGHT_LEN = 25;
+const isNight = (S) => !!MAPS[S.map].night && S.clk % DAY_LEN >= DAY_LEN - NIGHT_LEN;
+/** Posición de un texto flotante: x, y pensados para el mapa pequeño (1280×640), se escalan al mapa actual. */
+const scrX = (S) => MAPS[S.map].W / 2, scrY = (S, y) => (y * MAPS[S.map].H) / 640;
+/** Alcance extra o reducido por el mapa: riscos +25 %; de noche −30 % salvo cerca de una antorcha encendida. */
+export function mapRangeMul(S, t) {
+  const M = MAPS[S.map];
+  let k = M.highAt.has(t.y * M.cols + t.x) ? 1.25 : 1;
+  if (S.nt) {
+    const x = t.x * CELL + 20, y = t.y * CELL + 20;
+    const lit = M.traps.some((q, i) => q.t === 'torch' && S.tr[i].a > 0 && (q.x * CELL + 20 - x) ** 2 + (q.y * CELL + 20 - y) ** 2 <= TORCH_R * TORCH_R);
+    if (!lit) k *= 0.7;
+  }
+  return k;
+}
 
 /**
  * Partida nueva. act = puestos (0-3) de los jugadores presentes.
@@ -46,7 +64,7 @@ export function newGame(map = 0, act = [0], decks = null) {
     ph: 'play', pa: 0, pb: '', au: 0, sp: 1, map: MAPS[map] ? map : 0, w: 0, wt: 0, si: 0, ic: 20,
     money: [0, 0, 0, 0], act, gr: 0, st: [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ch: null, cn: 0, cb: 0, tb: [{}, {}, {}, {}], lo: 0, gid: Date.now().toString(36) + (gidN++ % 1296).toString(36),
     life: M.life, nid: 1, kills: 0, T: [], E: [],
-    ob: M.obs.map(() => 0), sw: M.forks.map(() => 0), swc: 0, tr: M.traps.map(() => ({ c: 0, a: 0 })),
+    ob: M.obs.map(() => 0), sw: M.forks.map(() => 0), swc: 0, tr: M.traps.map(() => ({ c: 0, a: 0 })), clk: 0, nt: 0,
     dk: [0, 1, 2, 3].map((i) => cleanDeck(decks && decks[i])), rvu: 0,
     md: [], cd: null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0], _gb: 0, _gr: 0, _gs: 0, _src: null,
   };
@@ -112,7 +130,7 @@ function chWin(S) {
   c.st = 1; S.cn++;
   const gold = Math.round(50 + 12 * S.w);
   for (const x of S.act) give(S, x, gold);
-  S._fx.push(['ch', 'ok', chText(c), gold], ['t', 640, 230, '¡RETO CUMPLIDO! +' + gold + ' de oro cada uno', '#7fe05a', 2.5]);
+  S._fx.push(['ch', 'ok', chText(c), gold], ['t', scrX(S), scrY(S, 230), '¡RETO CUMPLIDO! +' + gold + ' de oro cada uno', '#7fe05a', 2.5]);
 }
 function chFail(S) {
   S.ch.st = 2;
@@ -183,7 +201,7 @@ export function setRoster(S, slots) {
 // ---------- utilidades de torres ----------
 export const tStats = (t) => stats(t.k, t.p);
 /** Alcance real de la torre (incluye aura del Linter y parches). */
-export const tRange = (S, t) => tStats(t).range * (1 + (t._rb || 0)) * S._m.range * (1 + (S._gr || 0)) * lvMul(t);
+export const tRange = (S, t) => tStats(t).range * (1 + (t._rb || 0)) * S._m.range * (1 + (S._gr || 0)) * lvMul(t) * mapRangeMul(S, t);
 export function upgradeCost(S, t, i) {
   const u = TOWERS[t.k].paths[i].ups[t.p[i]];
   return u ? Math.round(u.c * (1 - (t._disc || 0)) * (1 - S._m.upDisc)) : 0;
@@ -205,8 +223,9 @@ export const limitFor = (S, k) => TOWERS[k].each || (TOWERS[k].max ? Math.max(1,
 /** false si el jugador del puesto sl ya tiene el máximo de torres de ese tipo (Mercaderes). */
 export const underLimit = (S, k, sl) => !limitFor(S, k) || S.T.filter((t) => t.k === k && t.o === sl).length < limitFor(S, k);
 export function cellFree(S, cx, cy, ignoreId) {
-  if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
-  const M = MAPS[S.map], key = cy * COLS + cx;
+  const M = MAPS[S.map];
+  if (cx < 0 || cy < 0 || cx >= M.cols || cy >= M.rows) return false;
+  const key = cy * M.cols + cx;
   if (M.blocked.has(key)) return false;
   const oi = M.obsAt.get(key);
   if (oi !== undefined && !S.ob[oi]) return false;
@@ -299,7 +318,7 @@ export function applyAction(S, a) {
       S.md.push(id);
       if (CARDS[id].now) CARDS[id].now(S, (n) => shareGold(S, n));
       S._m = calcMods(S.md); S.cd = null;
-      S._fx.push(['t', 640, 150, 'RELIQUIA: ' + CARDS[id].n, '#ffe14a', 2.2]);
+      S._fx.push(['t', scrX(S), scrY(S, 150), 'RELIQUIA: ' + CARDS[id].n, '#ffe14a', 2.2]);
       return true;
     }
     case 'auto':
@@ -380,6 +399,27 @@ export function applyAction(S, a) {
         tr.c = BOMB_CD;
         const x = def.x * CELL + 20, y = def.y * CELL + 20;
         S._boom.push([x, y, 45 * hpMult(Math.max(1, S.w)) * M.hp, BOMB_R, 1, '#ffb03f', 1, sl]); // la dinamita es de quien la detona
+      } else if (def.t === 'flood') { tr.a = FLOOD_T; tr.c = FLOOD_CD; }
+      else if (def.t === 'torch') { tr.a = TORCH_T; tr.c = TORCH_T; }
+      else if (def.t === 'cannon') {
+        const live = S.E.filter((e) => e.h > 0);
+        if (!live.length) return false;
+        const tgt = live.reduce((b, e) => ((ENEMIES[e.k].boss ? 1e9 : 0) + e.h > (ENEMIES[b.k].boss ? 1e9 : 0) + b.h ? e : b));
+        tr.c = CANNON_CD;
+        const x = def.x * CELL + 20, y = def.y * CELL + 20;
+        S._fx.push(['a', x, y, Math.round(tgt._x), Math.round(tgt._y), 55, '#9aa3ad', 1]);
+        S._boom.push([tgt._x, tgt._y, 160 * hpMult(Math.max(1, S.w)) * M.hp, 55, 0, '#ffb03f', 1, sl]);
+      } else if (def.t === 'rock') {
+        const st = M.rockD[i];
+        tr.c = ROCK_CD;
+        const d0 = st.d, d1 = Math.max(0, st.d - ROCK_LEN), pts = [];
+        for (let d = d0; d >= d1; d -= 12) pts.push(pathPos(M, st.r, d));
+        const dmg = 60 * hpMult(Math.max(1, S.w)) * M.hp;
+        for (const e of S.E) {
+          if (e.h <= 0 || ENEMIES[e.k].fly) continue;
+          if (pts.some((p) => (p.x - e._x) ** 2 + (p.y - e._y) ** 2 < 26 * 26)) { stunE(e, 1.2); damage(S, e, dmg, 'x', 6, sl); }
+        }
+        S._fx.push(['rk', st.r, Math.round(d0), Math.round(d1)]);
       } else { tr.a = GATE_T; tr.c = GATE_CD; }
       return true;
     }
@@ -396,7 +436,7 @@ export function applyAction(S, a) {
 /** Empieza ya la siguiente oleada y paga el bonus por los segundos saltados. */
 function callEarly(S, left) {
   const bonus = Math.round(skipBonus(S.w, S.ic - left) * S._m.wave);
-  if (bonus > 0) { shareGold(S, bonus); S._fx.push(['t', 640, 340, `+${bonus} de oro por saltar`, '#ffe14a', 1.4]); }
+  if (bonus > 0) { shareGold(S, bonus); S._fx.push(['t', scrX(S), scrY(S, 340), `+${bonus} de oro por saltar`, '#ffe14a', 1.4]); }
   S.ic = left;
 }
 
@@ -624,7 +664,7 @@ function leak(S, e) {
   if (S._lk) S._lk[e.k] = (S._lk[e.k] || 0) + ENEMIES[e.k].dmg;
 }
 
-const visible = (S, e, det) => det || !ENEMIES[e.k].camo || e.rv > 0 || S._m.detect;
+const visible = (S, e, det) => det || (!ENEMIES[e.k].camo && !e.fg) || e.rv > 0 || S._m.detect;
 /** Enemigos vivos dentro del radio. det = la torre detecta ofuscados (o es un efecto de área). */
 function inRange(S, x, y, r, det) {
   const out = [];
@@ -672,7 +712,7 @@ export function calcBuffs(S) {
       if (l.at > 0) cf = 1;
     }
     t._b = b; t._bo = bo; t._rr = rr; t._rb = rb; t._disc = disc; t._det = det; t._ap = ap; t._cf = cf;
-    t._pad = M.padAt.has(t.y * COLS + t.x) ? 1 : 0;
+    t._pad = M.padAt.has(t.y * M.cols + t.x) ? 1 : 0;
     const ts = tStats(t);
     if (ts.bounty && t.o >= 0) bounty[t.o] = Math.max(bounty[t.o], ts.bounty);
     if (t.dz <= 0) { gb = Math.max(gb, ts.gbuff || 0); gr = Math.max(gr, ts.grange || 0); gs = Math.max(gs, ts.gslow || 0); }
@@ -689,6 +729,15 @@ export function step(S, dt) {
 
   if (S.swc > 0) S.swc -= dt;
   for (const tr of S.tr) { if (tr.c > 0) tr.c -= dt; if (tr.a > 0) tr.a -= dt; }
+  S.clk += dt;
+  const night = isNight(S);
+  if (night !== !!S.nt) { S.nt = night ? 1 : 0; S._fx.push(['t', scrX(S), scrY(S, 200), night ? 'CAE LA NOCHE: encended las antorchas' : 'AMANECE', night ? '#a9c8ff' : '#ffe14a', 2.5]); }
+  // esclusas abiertas: el agua frena y moja a los barriles de tierra que pillan
+  M.traps.forEach((q, i) => {
+    if (q.t !== 'flood' || S.tr[i].a <= 0) return;
+    const x = q.x * CELL + 20, y = q.y * CELL + 20, r = q.r * CELL;
+    for (const e of S.E) if (e.h > 0 && !ENEMIES[e.k].fly && (e._x - x) ** 2 + (e._y - y) ** 2 <= r * r) { slowE(e, 0.6, 0.3); e.wt = Math.max(e.wt, 3 * m.wet); }
+  });
 
   // --- oleadas ---
   if (S.ic > 0) {
@@ -696,7 +745,7 @@ export function step(S, dt) {
     if (S.ic <= 0) {
       S.ic = 0; S.w++; S.wt = 0; S.si = 0; S._fx.push(['w', S.w]);
       chStart(S);
-      for (const en of M.entries) if (en.from === S.w && S.w > 1) S._fx.push(['t', 640, 190, '¡SE HA ABIERTO UNA CUEVA!', '#ff5a4a', 3]);
+      for (const en of M.entries) if (en.from === S.w && S.w > 1) S._fx.push(['t', scrX(S), scrY(S, 190), '¡SE HA ABIERTO UNA CUEVA!', '#ff5a4a', 3]);
     }
   } else {
     const q = genWave(S.map, S.w);
@@ -758,7 +807,7 @@ export function step(S, dt) {
         }
       }
     } else {
-      let nd = e.d + def.sp * (e.sl > 0 ? 1 - e.sf : 1) * (1 - S._gs * (def.boss ? 0.5 : 1)) * dt;
+      let nd = e.d + def.sp * (e.sl > 0 ? 1 - e.sf : 1) * (1 - S._gs * (def.boss ? 0.5 : 1)) * (e.zm || 1) * dt;
       if (def.fly) {
         e.d = nd;
         if (nd >= M.flyLen[e.r]) { leak(S, e); continue; }
@@ -774,14 +823,16 @@ export function step(S, dt) {
         e.d = nd;
         for (const o of free) {
           if (o.u.e || (def.ghost && !o.gb)) continue;
-          if (def.camo && !o.det && e.rv <= 0 && !m.detect) continue;
+          if ((def.camo || e.fg) && !o.det && e.rv <= 0 && !m.detect) continue;
           if ((o.x - e._x) ** 2 + (o.y - e._y) ** 2 < 100) { o.u.e = e.i; e.b = o.t.i * 8 + o.j; e.ac = 0.4; break; }
         }
         if (e.d >= M.R[e.r].len) { leak(S, e); continue; }
         // zonas del mapa
-        const z = M.zoneAt.get(Math.floor(e._y / CELL) * COLS + Math.floor(e._x / CELL));
+        const z = M.zoneAt.get(Math.floor(e._y / CELL) * M.cols + Math.floor(e._x / CELL));
         if (z === 'heat') burnE(S, e, 3 + S.w * 1.5, 1, true, -1);
         else if (z === 'cool') e.wt = Math.max(e.wt, 2.5 * m.wet);
+        e.zm = z === 'mud' ? 0.6 : z === 'wind' ? 1.35 : 1; // barro frena, viento acelera
+        e.fg = z === 'fog' ? 1 : 0;                         // en la niebla solo los ven las torres con detección
       }
     }
     place(M, e);
@@ -1043,7 +1094,7 @@ function finish(S) {
       const s = tStats(ph);
       S.rvu |= 1 << ph.o; S.life = s.revive; ph.dz = 45; S.st[ph.o][8] += s.revive;
       if (s.reviveStun) for (const e of S.E) stunE(e, s.reviveStun);
-      S._fx.push(['g', '#ff6a2a'], ['t', 640, 260, '¡EL FÉNIX SALVA LA GUARIDA!', '#ffb52a', 3.5]);
+      S._fx.push(['g', '#ff6a2a'], ['t', scrX(S), scrY(S, 260), '¡EL FÉNIX SALVA LA GUARIDA!', '#ffb52a', 3.5]);
     } else { S.life = 0; S.ph = 'lost'; }
   }
 }
@@ -1068,7 +1119,7 @@ function endWave(S) {
     if (extra) { give(S, sl, extra); total += extra; }
     if (heal && S.life < M.life) { const b = S.life; S.life = Math.min(M.life, S.life + heal); S.st[sl][8] += S.life - b; S._fx.push(['l', S.life - b]); }
   }
-  S._fx.push(['m', 640, 300, total]);
+  S._fx.push(['m', scrX(S), scrY(S, 300), total]);
   S.ic = 12;
   if (S.w % 5 === 0) offerCards(S); // tras cada jefe: elegir reliquia
   if (S.au) callEarly(S, 1);
@@ -1080,7 +1131,7 @@ const r1 = (n) => Math.round(n * 10) / 10;
 export function pack(S, fx) {
   return JSON.stringify({
     p: S.ph, pa: S.pa, pb: S.pb, au: S.au, sp: S.sp, mp: S.map, w: S.w, wt: r1(S.wt), si: S.si, ic: r1(S.ic), mo: S.money.map(Math.floor), ac: S.act, gr: S.gr, st: S.st.map((a) => a.map(Math.round)), ch: S.ch && [S.ch.k, S.ch.n, Math.round(S.ch.p), S.ch.st, r1(S.ch.tm), S.ch.e], cn: S.cn, tb: S.tb.map((o) => Object.entries(o).map(([k, n]) => [TOWER_KEYS.indexOf(k), n])), lo: S.lo, gi: S.gid, dk: S.dk.map((d) => (d ? d.map((x) => [TOWER_KEYS.indexOf(x[0]), x[1]]) : 0)), ru: S.rvu, li: S.life, n: S.nid, ki: S.kills,
-    ob: S.ob.join(''), sw: S.sw.join(''), sc: Math.ceil(Math.max(0, S.swc)), tr: S.tr.map((t) => [Math.ceil(Math.max(0, t.c)), r1(Math.max(0, t.a))]), md: S.md, cd: S.cd,
+    ob: S.ob.join(''), sw: S.sw.join(''), sc: Math.ceil(Math.max(0, S.swc)), tr: S.tr.map((t) => [Math.ceil(Math.max(0, t.c)), r1(Math.max(0, t.a))]), ck: r1(S.clk), nt: S.nt, md: S.md, cd: S.cd,
     T: S.T.map((t) => {
       const a = [t.i, TOWER_KEYS.indexOf(t.k), t.x, t.y, t.p[0] * 100 + t.p[1] * 10 + t.p[2], t.tg, r1(Math.max(0, t.c)), r1(Math.max(0, t.dz)), t.inv, r1(t.cy), r1(t.a), Math.ceil(Math.max(0, t.ac)), r1(Math.max(0, t.at)), t.o, t.lv || 1,
         t.tt || tStats(t).stack ? [t.tt || 0, r1(t.rp || 0), t.kc || 0] : 0];
@@ -1096,7 +1147,7 @@ export function pack(S, fx) {
 export function unpack(str) {
   const o = JSON.parse(str);
   const S = { ph: o.p, pa: o.pa, pb: o.pb, au: o.au || 0, sp: o.sp || 1, map: o.mp || 0, w: o.w, wt: o.wt, si: o.si, ic: o.ic, money: o.mo, act: o.ac || [0], gr: o.gr || 0, st: (o.st || [0, 1, 2, 3].map(() => [])).map((a) => Array.from({ length: NST }, (_, i) => a[i] || 0)), ch: o.ch ? { k: o.ch[0], n: o.ch[1], p: o.ch[2], st: o.ch[3], tm: o.ch[4], e: o.ch[5] } : null, cn: o.cn || 0, tb: (o.tb || [[], [], [], []]).map((l) => Object.fromEntries(l.map(([i, n]) => [TOWER_KEYS[i], n]))), lo: o.lo || 0, gid: o.gi || '', dk: (o.dk || [0, 0, 0, 0]).map((d) => (d ? d.map((x) => [TOWER_KEYS[x[0]], x[1]]) : null)), rvu: o.ru || 0, life: o.li, nid: o.n, kills: o.ki,
-    ob: String(o.ob || '').split('').map(Number), sw: String(o.sw || '').split('').map(Number), swc: o.sc || 0, tr: (o.tr || []).map((a) => ({ c: a[0], a: a[1] })),
+    ob: String(o.ob || '').split('').map(Number), sw: String(o.sw || '').split('').map(Number), swc: o.sc || 0, tr: (o.tr || []).map((a) => ({ c: a[0], a: a[1] })), clk: o.ck || 0, nt: o.nt || 0,
     md: o.md || [], cd: o.cd || null, _fx: [], _spawn: [], _boom: [], _bounty: [0, 0, 0, 0], _gb: 0, _gr: 0, _gs: 0, _src: null };
   S._m = calcMods(S.md);
   const M = MAPS[S.map];

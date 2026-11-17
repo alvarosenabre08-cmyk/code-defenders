@@ -73,6 +73,72 @@ const MAP_DEFS = [
     traps: [{ t: 'gate', x: 9, y: 9 }, { t: 'gate', x: 22, y: 6 }, { t: 'bomb', x: 10, y: 4 }, { t: 'bomb', x: 20, y: 11 }],
     pads: [[7, 8], [24, 7], [11, 7], [20, 9]],
   },
+  {
+    name: 'Pantano', diff: 'Muy difícil', tag: 'Niebla y barro', skin: 'pantano', cols: 36, rows: 18,
+    desc: 'Mapa más grande con 3 entradas. El barro frena a los barriles, pero en la NIEBLA solo los ven las torres con detección. Abrid las esclusas para inundar el camino y usad la señal para mandarlos por el rodeo.',
+    theme: { a: '#9fd36a', b: '#6fd0c0' },
+    waves: 30, hp: 0.95, money: 600, life: 80, camoFrom: 6, armorFrom: 8, flyFrom: 8, flyMul: 0.9,
+    routes: [
+      [[-1, 3], [7, 3], [7, 8], [14, 8], [14, 3], [22, 3], [22, 9], [33, 9]],
+      [[-1, 14], [11, 14], [11, 12], [18, 12], [18, 16], [27, 16], [27, 9], [33, 9]],
+      [[-1, 14], [11, 14], [11, 12], [18, 12], [24, 12], [24, 9], [33, 9]],
+      [[29, -1], [29, 6], [22, 6], [22, 9], [33, 9]],
+    ],
+    entries: [{ r: 0, from: 1, w: 1 }, { r: 2, from: 1, w: 1 }, { r: 3, from: 10, w: 1 }],
+    forks: [{ r: 2, alt: 1, at: [18, 12], cell: [19, 11] }],
+    base: { x: 33, y: 8, w: 2, h: 3 },
+    obs: [[6, 2, 70], [8, 5, 80], [10, 7, 90], [13, 5, 90], [16, 2, 90], [20, 5, 100], [12, 13, 90], [16, 14, 100], [21, 15, 110],
+      [25, 11, 110], [26, 14, 120], [28, 11, 120], [30, 7, 120], [31, 4, 110], [4, 13, 80], [3, 6, 70], [17, 9, 100], [23, 7, 110]],
+    zones: [{ t: 'mud', x0: 7, y0: 4, x1: 7, y1: 7 }, { t: 'mud', x0: 19, y0: 16, x1: 26, y1: 16 },
+      { t: 'fog', x0: 15, y0: 2, x1: 20, y1: 4 }, { t: 'fog', x0: 19, y0: 11, x1: 23, y1: 13 }, { t: 'cool', x0: 2, y0: 14, x1: 8, y1: 14 }],
+    traps: [{ t: 'flood', x: 15, y: 11, r: 3 }, { t: 'flood', x: 25, y: 7, r: 3 }, { t: 'gate', x: 29, y: 3 }, { t: 'bomb', x: 4, y: 4 }],
+    pads: [], highs: [],
+  },
+  {
+    name: 'Cañón', diff: 'Extremo', tag: 'Desfiladero rojo', skin: 'canon', cols: 40, rows: 20,
+    desc: 'Cuatro entradas y la última se abre en la oleada 15, muy cerca de la guarida. Construid en los RISCOS (+25% de alcance), cuidado con el VIENTO que acelera a los barriles y soltad DESPRENDIMIENTOS de rocas que barren un tramo entero del camino.',
+    theme: { a: '#ffae6a', b: '#ffd447' },
+    waves: 35, hp: 0.4, money: 900, life: 80, camoFrom: 5, armorFrom: 7, flyFrom: 7, flyMul: 0.9,
+    routes: [
+      [[-1, 3], [8, 3], [8, 9], [3, 9], [3, 16], [13, 16], [13, 6], [20, 6], [20, 10], [36, 10]],
+      [[27, 20], [27, 17], [33, 17], [33, 13], [24, 13], [24, 10], [36, 10]],
+      [[32, -1], [32, 4], [24, 4], [24, 8], [29, 8], [29, 10], [36, 10]],
+      [[40, 18], [36, 18], [36, 13], [37, 13], [37, 11]],
+    ],
+    entries: [{ r: 0, from: 1, w: 1 }, { r: 1, from: 1, w: 1 }, { r: 2, from: 4, w: 1 }, { r: 3, from: 15, w: 1 }],
+    forks: [],
+    base: { x: 36, y: 9, w: 2, h: 3 },
+    obs: [[5, 5, 80], [10, 5, 90], [6, 12, 90], [11, 13, 100], [16, 8, 100], [18, 3, 100], [22, 8, 110], [27, 6, 110], [30, 15, 120],
+      [26, 15, 120], [35, 6, 120], [38, 15, 130], [15, 12, 110], [1, 13, 80], [30, 1, 110], [18, 18, 110], [8, 18, 100], [34, 2, 120], [22, 15, 120], [11, 8, 100]],
+    zones: [{ t: 'wind', x0: 4, y0: 16, x1: 12, y1: 16 }, { t: 'wind', x0: 25, y0: 13, x1: 32, y1: 13 }, { t: 'cool', x0: 13, y0: 7, x1: 13, y1: 15 }, { t: 'heat', x0: 25, y0: 4, x1: 31, y1: 4 }],
+    traps: [{ t: 'rock', x: 9, y: 6 }, { t: 'rock', x: 30, y: 18 }, { t: 'rock', x: 27, y: 9 }, { t: 'gate', x: 20, y: 8 }, { t: 'gate', x: 33, y: 15 }, { t: 'bomb', x: 34, y: 8 }],
+    pads: [], highs: [[6, 7], [16, 4], [10, 11], [22, 11], [31, 6], [35, 15], [17, 14]],
+  },
+  {
+    name: 'Ciudadela', diff: 'Legendario', tag: 'Fortaleza de la tormenta', skin: 'ciudadela', cols: 44, rows: 22,
+    desc: 'El mapa más grande: 5 entradas y la guarida en el centro. Hay DÍA y NOCHE: de noche las torres ven un 30% menos salvo cerca de una ANTORCHA encendida. Las 2 señales mandan a los barriles por el atajo: cambiadlas para que den el rodeo. Disparad los CAÑONES de la muralla.',
+    theme: { a: '#a9c8ff', b: '#ffd447' },
+    waves: 40, hp: 0.36, money: 1100, life: 80, camoFrom: 5, armorFrom: 6, flyFrom: 7, flyMul: 1, night: 1,
+    routes: [
+      [[-1, 2], [12, 2], [12, 5], [4, 5], [4, 8], [16, 8], [16, 10], [20, 10]],
+      [[-1, 19], [5, 19], [5, 13], [10, 13], [10, 19], [16, 19], [16, 13], [21, 13], [21, 11]],
+      [[30, -1], [30, 3], [39, 3], [39, 7], [26, 7], [26, 5], [22, 5], [22, 9]],
+      [[44, 10], [36, 10], [36, 14], [28, 14], [28, 10], [22, 10]],
+      [[44, 19], [39, 19], [39, 17], [24, 17], [24, 12], [22, 12], [22, 11]],
+      [[-1, 2], [12, 2], [12, 5], [18, 5], [18, 10], [20, 10]],
+      [[44, 10], [36, 10], [28, 10], [22, 10]],
+    ],
+    entries: [{ r: 5, from: 1, w: 1 }, { r: 1, from: 1, w: 1 }, { r: 6, from: 1, w: 1 }, { r: 2, from: 6, w: 1 }, { r: 4, from: 15, w: 1 }],
+    forks: [{ r: 5, alt: 0, at: [12, 5], cell: [13, 4] }, { r: 6, alt: 3, at: [36, 10], cell: [35, 9] }],
+    base: { x: 20, y: 9, w: 3, h: 3 },
+    obs: [[2, 3, 80], [8, 4, 90], [7, 10, 100], [2, 15, 90], [8, 16, 100], [13, 15, 100], [14, 11, 250], [25, 9, 250], [33, 5, 110], [41, 5, 120],
+      [34, 12, 120], [30, 16, 130], [41, 14, 120], [19, 15, 130], [14, 3, 100], [36, 1, 110], [27, 2, 110], [19, 3, 100], [31, 19, 120], [37, 21, 120]],
+    zones: [{ t: 'fog', x0: 6, y0: 14, x1: 9, y1: 18 }, { t: 'mud', x0: 29, y0: 14, x1: 35, y1: 14 },
+      { t: 'wind', x0: 31, y0: 3, x1: 38, y1: 3 }, { t: 'cool', x0: 25, y0: 17, x1: 33, y1: 17 }, { t: 'heat', x0: 6, y0: 8, x1: 14, y1: 8 }],
+    traps: [{ t: 'torch', x: 7, y: 6 }, { t: 'torch', x: 13, y: 11 }, { t: 'torch', x: 13, y: 17 }, { t: 'torch', x: 32, y: 8 }, { t: 'torch', x: 33, y: 12 }, { t: 'torch', x: 30, y: 19 }, { t: 'torch', x: 25, y: 2 },
+      { t: 'cannon', x: 19, y: 7 }, { t: 'cannon', x: 24, y: 9 }, { t: 'gate', x: 10, y: 16 }, { t: 'gate', x: 30, y: 1 }, { t: 'gate', x: 39, y: 18 }, { t: 'bomb', x: 3, y: 1 }, { t: 'bomb', x: 41, y: 11 }],
+    pads: [[14, 11], [25, 9]], highs: [[10, 4], [7, 12], [36, 6], [26, 15], [18, 15], [33, 9]],
+  },
 ];
 
 /** Posición en píxeles a una distancia d del inicio de la ruta r. */
@@ -111,8 +177,10 @@ function dAt(M, r, [cx, cy]) {
 }
 
 function buildMap(def) {
-  const M = { ...def };
-  const key = (x, y) => y * COLS + x;
+  const M = { cols: COLS, rows: ROWS, highs: [], ...def };
+  // cada mapa tiene su tamaño de cuadrícula; se dibuja encogido para que se vea entero en pantalla
+  M.W = M.cols * CELL; M.H = M.rows * CELL; M.k = W / M.W;
+  const key = (x, y) => y * M.cols + x;
   M.R = def.routes.map((wp) => {
     const pts = wp.map(([x, y]) => ({ x: x * CELL + 20, y: y * CELL + 20 }));
     const seg = [];
@@ -131,7 +199,7 @@ function buildMap(def) {
       const dx = Math.sign(x1 - x0), dy = Math.sign(y1 - y0);
       let x = x0, y = y0;
       for (;;) {
-        if (x >= 0 && x < COLS && y >= 0 && y < ROWS) M.blocked.add(key(x, y));
+        if (x >= 0 && x < M.cols && y >= 0 && y < M.rows) M.blocked.add(key(x, y));
         if (x === x1 && y === y1) break;
         x += dx; y += dy;
       }
@@ -145,7 +213,11 @@ function buildMap(def) {
   M.obsAt = new Map(def.obs.map((o, i) => [key(o[0], o[1]), i]));
   M.padAt = new Set(def.pads.map(([x, y]) => key(x, y)));
   M.trapAt = new Map(def.traps.map((t, i) => [key(t.x, t.y), i]));
-  for (const t of def.traps) if (t.t === 'bomb') M.blocked.add(key(t.x, t.y));
+  M.highAt = new Set(M.highs.map(([x, y]) => key(x, y)));
+  // objetos que ocupan su casilla (no se puede construir encima)
+  for (const t of def.traps) if (t.t !== 'gate') M.blocked.add(key(t.x, t.y));
+  // desprendimientos: la roca rueda por el camino más cercano, hacia la entrada
+  M.rockD = def.traps.map((t) => (t.t === 'rock' ? nearestD(M, t.x * CELL + 20, t.y * CELL + 20) : null));
   M.swAt = new Map(def.forks.map((f, i) => [key(f.cell[0], f.cell[1]), i]));
   for (const f of def.forks) M.blocked.add(key(f.cell[0], f.cell[1]));
   M.forks = def.forks.map((f) => ({ ...f, d: dAt(M, f.r, f.at) }));
